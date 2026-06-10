@@ -105,6 +105,7 @@ function describe(traits: Record<Trait, number>, selected: Note[]) {
 export default function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<Creation[]>(loadHistory);
+  const [activeNote, setActiveNote] = useState<Note | null>(null);
 
   const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
   const traits = useMemo(
@@ -123,9 +124,18 @@ export default function App() {
 
   const current = selectedNotes.length > 0 ? describe(traits, selectedNotes) : null;
 
-  function addNote(id: string) {
-    if (selectedIds.length >= 5) return;
-    setSelectedIds((items) => [...items, id]);
+  function openNoteDetail(note: Note) {
+    setActiveNote(note);
+  }
+
+  function closeNoteDetail() {
+    setActiveNote(null);
+  }
+
+  function addNoteFromDrawer() {
+    if (!activeNote || selectedIds.length >= 5) return;
+    setSelectedIds((items) => [...items, activeNote.id]);
+    closeNoteDetail();
   }
 
   function bottleCreation() {
@@ -161,7 +171,7 @@ export default function App() {
           <h2>香调架</h2>
           <div className="note-grid">
             {notes.map((note) => (
-              <button key={note.id} className="note-card" onClick={() => addNote(note.id)}>
+              <button key={note.id} className="note-card" onClick={() => openNoteDetail(note)}>
                 <span className="swatch" style={{ background: note.color }} />
                 <strong>{note.name}</strong>
                 <small>{note.profile}</small>
@@ -223,6 +233,36 @@ export default function App() {
           )}
         </div>
       </section>
+
+      {activeNote && (
+        <div className="drawer-overlay" onClick={closeNoteDetail}>
+          <div className="drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={closeNoteDetail}>×</button>
+            <div className="drawer-content">
+              <span className="swatch-large" style={{ background: activeNote.color }} />
+              <h2 className="drawer-title">{activeNote.name}</h2>
+              <p className="drawer-profile">{activeNote.profile}</p>
+              <div className="drawer-traits">
+                <h3>气味性格</h3>
+                {(Object.keys(activeNote.traits) as Trait[]).map((trait) => (
+                  <label key={trait}>
+                    <span>{traitLabels[trait]}</span>
+                    <meter min={0} max={4} value={activeNote.traits[trait]} />
+                    <b>{activeNote.traits[trait]}</b>
+                  </label>
+                ))}
+              </div>
+              <button
+                className="primary-button drawer-action"
+                disabled={selectedIds.length >= 5}
+                onClick={addNoteFromDrawer}
+              >
+                {selectedIds.length >= 5 ? "调香台已满" : "加入调香台"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -243,3 +243,154 @@ meter {
     font-size: 2.7rem;
   }
 }
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 26, 23, 0.55);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.drawer {
+  width: 420px;
+  max-width: 100%;
+  height: 100%;
+  background: #fffaf0;
+  box-shadow: -8px 0 40px rgba(45, 34, 20, 0.2);
+  position: relative;
+  animation: slideInRight 0.3s ease;
+  overflow-y: auto;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.drawer-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  font-size: 28px;
+  color: #6d6259;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 1;
+}
+
+.drawer-close:hover {
+  background: rgba(58, 42, 28, 0.08);
+}
+
+.drawer-content {
+  padding: 48px 28px 28px;
+}
+
+.swatch-large {
+  display: block;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  margin-bottom: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 16px rgba(45, 34, 20, 0.15);
+}
+
+.drawer-title {
+  font-size: 2rem;
+  margin-bottom: 12px;
+  color: #1c1a17;
+}
+
+.drawer-profile {
+  color: #6d6259;
+  line-height: 1.6;
+  margin-bottom: 28px;
+  font-size: 1.05rem;
+}
+
+.drawer-traits {
+  margin-bottom: 28px;
+}
+
+.drawer-traits h3 {
+  font-size: 1rem;
+  margin-bottom: 16px;
+  color: #7a513f;
+}
+
+.drawer-traits label {
+  display: grid;
+  grid-template-columns: 54px 1fr 28px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.drawer-traits meter {
+  width: 100%;
+  height: 14px;
+}
+
+.drawer-action {
+  margin-top: 8px;
+}
+
+@media (max-width: 768px) {
+  .drawer-overlay {
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .drawer {
+    width: 100%;
+    max-height: 85vh;
+    height: auto;
+    border-radius: 20px 20px 0 0;
+    animation: slideInUp 0.3s ease;
+  }
+
+  @keyframes slideInUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .drawer::before {
+    content: "";
+    display: block;
+    width: 48px;
+    height: 4px;
+    background: rgba(58, 42, 28, 0.2);
+    border-radius: 2px;
+    margin: 12px auto 0;
+  }
+
+  .drawer-content {
+    padding: 32px 24px 28px;
+  }
+
+  .swatch-large {
+    width: 72px;
+    height: 72px;
+  }
+
+  .drawer-title {
+    font-size: 1.6rem;
+  }
+}

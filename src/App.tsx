@@ -27,6 +27,9 @@ type Creation = {
   traits?: Record<Trait, number>;
   notes: string[];
   createdAt: string;
+  sourceCreationId?: string;
+  sourceCreationName?: string;
+  isReplicate?: boolean;
 };
 
 const storageKey = "hxwl-1-creations";
@@ -289,17 +292,48 @@ function isValidCreation(data: unknown): data is Creation {
   );
 }
 
+function resolveCreationNoteIdsLegacy(notes: string[]): string[] {
+  const ids: string[] = [];
+  for (const noteName of notes) {
+    const note = getNoteByName(noteName);
+    if (note) {
+      ids.push(note.id);
+    }
+  }
+  return ids;
+}
+
 function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
   const safeNotes = Array.isArray(data.notes) ? data.notes.filter((n) => typeof n === "string") : [];
-  const safeTraits = (data.traits && typeof data.traits === "object")
-    ? {
-        fresh: typeof data.traits.fresh === "number" && isFinite(data.traits.fresh) ? data.traits.fresh : 0,
-        sweet: typeof data.traits.sweet === "number" && isFinite(data.traits.sweet) ? data.traits.sweet : 0,
-        wood: typeof data.traits.wood === "number" && isFinite(data.traits.wood) ? data.traits.wood : 0,
-        spice: typeof data.traits.spice === "number" && isFinite(data.traits.spice) ? data.traits.spice : 0
-      }
-    : undefined;
+
+  let safeTraits: Record<Trait, number> | undefined;
+  if (data.traits && typeof data.traits === "object") {
+    safeTraits = {
+      fresh: typeof data.traits.fresh === "number" && isFinite(data.traits.fresh) ? data.traits.fresh : 0,
+      sweet: typeof data.traits.sweet === "number" && isFinite(data.traits.sweet) ? data.traits.sweet : 0,
+      wood: typeof data.traits.wood === "number" && isFinite(data.traits.wood) ? data.traits.wood : 0,
+      spice: typeof data.traits.spice === "number" && isFinite(data.traits.spice) ? data.traits.spice : 0
+    };
+  } else if (safeNotes.length > 0) {
+    const noteIds = resolveCreationNoteIdsLegacy(safeNotes);
+    if (noteIds.length > 0) {
+      const computedTraits = noteIds.reduce(
+        (total, noteId) => {
+          const note = getNoteById(noteId);
+          if (note) {
+            (Object.keys(total) as Trait[]).forEach((trait) => {
+              total[trait] += note.traits[trait];
+            });
+          }
+          return total;
+        },
+        { fresh: 0, sweet: 0, wood: 0, spice: 0 }
+      );
+      safeTraits = computedTraits;
+    }
+  }
   const hasAnyTrait = safeTraits && (safeTraits.fresh + safeTraits.sweet + safeTraits.wood + safeTraits.spice) > 0;
+
   return {
     id: data.id,
     name: typeof data.name === "string" && data.name ? data.name : "未命名作品",
@@ -308,7 +342,10 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
     description: typeof data.description === "string" && data.description ? data.description : "暂无描述",
     traits: hasAnyTrait ? safeTraits : undefined,
     notes: safeNotes,
-    createdAt: typeof data.createdAt === "string" && data.createdAt ? data.createdAt : new Date().toISOString()
+    createdAt: typeof data.createdAt === "string" && data.createdAt ? data.createdAt : new Date().toISOString(),
+    sourceCreationId: typeof data.sourceCreationId === "string" && data.sourceCreationId ? data.sourceCreationId : undefined,
+    sourceCreationName: typeof data.sourceCreationName === "string" && data.sourceCreationName ? data.sourceCreationName : undefined,
+    isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false
   };
 }
 
@@ -419,6 +456,8 @@ export default function App() {
   const [newlyUnlocked, setNewlyUnlocked] = useState<Note[]>([]);
   const [unlockNotificationOpen, setUnlockNotificationOpen] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(false);
+  const [replicateSource, setReplicateSource] = useState<Creation | null>(null);
+  const [replicateNotificationOpen, setReplicateNotificationOpen] = useState(false);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -519,7 +558,10 @@ export default function App() {
       description: current.description,
       traits,
       notes: selectedNotes.map((note) => note.name),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      sourceCreationId: replicateSource?.id,
+      sourceCreationName: replicateSource?.name,
+      isReplicate: !!replicateSource
     };
     const next = [creation, ...history].slice(0, 5);
     setHistory(next);
@@ -542,6 +584,33 @@ export default function App() {
     setCustomName("");
     setPendingCustomName("");
     setIsEditingName(false);
+    setReplicateSource(null);
+  }
+
+  function replicateCreation(creation: Creation) {
+    const noteIds: string[] = [];
+    for (const noteName of creation.notes) {
+      const note = getNoteByName(noteName);
+      if (note && unlockedNoteIds.includes(note.id)) {
+        noteIds.push(note.id);
+      }
+    }
+    if (noteIds.length === 0) {
+      return;
+    }
+    const limitedNoteIds = noteIds.slice(0, 5);
+    setSelectedIds(limitedNoteIds);
+    const replicateName = `${creation.name}（复刻）`;
+    setCustomName(replicateName);
+    setPendingCustomName(replicateName);
+    setIsEditingName(false);
+    setReplicateSource(creation);
+    closeCreationDetail();
+    setReplicateNotificationOpen(true);
+  }
+
+  function clearReplicateSource() {
+    setReplicateSource(null);
   }
 
   function handleQuizAnswer(option: QuizOption) {
@@ -654,6 +723,7 @@ export default function App() {
             setCustomName("");
             setPendingCustomName("");
             setIsEditingName(false);
+            setReplicateSource(null);
           }}
         >
           清空调香台
@@ -822,6 +892,21 @@ export default function App() {
                   <div className="name-display">
                     <strong>{displayName}</strong>
                     {customName && <span className="original-name">原名：{current.name}</span>}
+                    {replicateSource && (
+                      <span className="replicate-source">
+                        ✦ 复刻自：{replicateSource.name}
+                        <button
+                          className="replicate-clear-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearReplicateSource();
+                          }}
+                          title="取消复刻标记"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
                   </div>
                 )}
                 {!isEditingName && (
@@ -886,9 +971,12 @@ export default function App() {
           ) : (
             <div className="history-list">
               {history.map((creation) => (
-                <button key={creation.id} className="history-item" onClick={() => openCreationDetail(creation)}>
+                <button key={creation.id} className={`history-item ${creation.isReplicate ? "replicate-item" : ""}`} onClick={() => openCreationDetail(creation)}>
                   <span>{creation.score}分</span>
-                  <h3>{creation.name}</h3>
+                  <h3>
+                    {creation.name}
+                    {creation.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
+                  </h3>
                   <p>{(creation.notes || []).join(" / ") || "无香调记录"}</p>
                 </button>
               ))}
@@ -959,9 +1047,15 @@ export default function App() {
                 <span className="score-value">{activeCreation.score}</span>
                 <span className="score-label">分</span>
               </div>
-              <h2 className="drawer-title">{activeCreation.name}</h2>
+              <h2 className="drawer-title">
+                {activeCreation.name}
+                {activeCreation.isReplicate && <span className="replicate-badge">✦ 复刻</span>}
+              </h2>
               {activeCreation.originalName && activeCreation.name !== activeCreation.originalName && (
                 <p className="creation-original-name">原名：{activeCreation.originalName}</p>
+              )}
+              {activeCreation.sourceCreationName && (
+                <p className="replicate-source-info">复刻来源：{activeCreation.sourceCreationName}</p>
               )}
               <p className="drawer-profile">{activeCreation.description}</p>
 
@@ -1013,6 +1107,27 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              <div className="creation-actions">
+                <button
+                  className="primary-button replicate-action-btn"
+                  onClick={() => replicateCreation(activeCreation)}
+                  disabled={
+                    activeCreation.notes.length === 0 ||
+                    activeCreation.notes.every(
+                      (name) => !getNoteByName(name) || !unlockedNoteIds.includes(getNoteByName(name)!.id)
+                    )
+                  }
+                >
+                  {activeCreation.notes.length === 0
+                    ? "无香调可复刻"
+                    : activeCreation.notes.every(
+                        (name) => !getNoteByName(name) || !unlockedNoteIds.includes(getNoteByName(name)!.id)
+                      )
+                    ? "香调未解锁"
+                    : "✦ 复刻到调香台"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1051,6 +1166,50 @@ export default function App() {
                 onClick={() => setUnlockNotificationOpen(false)}
               >
                 太棒了！
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {replicateNotificationOpen && replicateSource && (
+        <div className="drawer-overlay replicate-overlay" onClick={() => setReplicateNotificationOpen(false)}>
+          <div className="replicate-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setReplicateNotificationOpen(false)}>×</button>
+            <div className="replicate-content">
+              <div className="replicate-icon">✦</div>
+              <h2 className="replicate-title">已复刻到调香台</h2>
+              <p className="replicate-subtitle">
+                配方「{replicateSource.name}」已恢复，你可以继续调整后封瓶
+              </p>
+              <div className="replicate-details">
+                <div className="replicate-detail-item">
+                  <span className="replicate-detail-label">香调数量</span>
+                  <span className="replicate-detail-value">{Math.min(replicateSource.notes.length, 5)} 种</span>
+                </div>
+                <div className="replicate-detail-item">
+                  <span className="replicate-detail-label">新作品名</span>
+                  <span className="replicate-detail-value">{replicateSource.name}（复刻）</span>
+                </div>
+                {hasTraits(replicateSource) && (
+                  <div className="replicate-detail-traits">
+                    {(Object.keys(traitLabels) as Trait[]).map((trait) => (
+                      <span
+                        key={trait}
+                        className="replicate-trait-chip"
+                        style={{ borderColor: getTraitColor(trait) }}
+                      >
+                        {traitLabels[trait]} {replicateSource.traits![trait]}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => setReplicateNotificationOpen(false)}
+              >
+                开始调整
               </button>
             </div>
           </div>

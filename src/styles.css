@@ -636,3 +636,19 @@ meter {
 .creation-drawer .drawer-content {
   padding-bottom: 40px;
 }
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.history-header h2 {
+  margin-bottom: 0;
+}
+
+.export-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

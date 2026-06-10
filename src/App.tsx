@@ -18,6 +18,7 @@ type Creation = {
   description: string;
   traits?: Record<Trait, number>;
   notes: string[];
+  createdAt: string;
 };
 
 const storageKey = "hxwl-1-creations";
@@ -166,7 +167,8 @@ export default function App() {
       score: current.score,
       description: current.description,
       traits,
-      notes: selectedNotes.map((note) => note.name)
+      notes: selectedNotes.map((note) => note.name),
+      createdAt: new Date().toISOString()
     };
     const next = [creation, ...history].slice(0, 5);
     setHistory(next);
@@ -175,6 +177,28 @@ export default function App() {
     setCustomName("");
     setPendingCustomName("");
     setIsEditingName(false);
+  }
+
+  function exportCreations() {
+    if (history.length === 0) return;
+    const exportData = history.map((creation) => ({
+      name: creation.name,
+      score: creation.score,
+      description: creation.description,
+      notes: creation.notes,
+      createdAt: creation.createdAt
+    }));
+    const jsonData = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonData], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.download = `雾瓶调香作品-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -315,7 +339,16 @@ export default function App() {
         </div>
 
         <div className="panel history-panel">
-          <h2>最近作品</h2>
+          <div className="history-header">
+            <h2>最近作品</h2>
+            <button
+              className="ghost-button small export-button"
+              disabled={history.length === 0}
+              onClick={exportCreations}
+            >
+              导出作品
+            </button>
+          </div>
           {history.length === 0 ? (
             <p className="empty">还没有封瓶作品。</p>
           ) : (

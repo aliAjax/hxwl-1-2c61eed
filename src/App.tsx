@@ -401,8 +401,8 @@ function analyzeReplicability(
   canReplicate: boolean;
   isPartial: boolean;
   unlockedCount: number;
-  missingUnlocked: string[];
-  missingUnknown: string[];
+  missingUnlockedNotes: string[];
+  missingUnknownNotes: string[];
   allUnlocked: string[];
 } {
   let unlockedCount = 0;
@@ -428,8 +428,8 @@ function analyzeReplicability(
     canReplicate: unlockedCount > 0,
     isPartial: unlockedCount > 0 && unlockedCount < creation.notes.length,
     unlockedCount,
-    missingUnlocked,
-    missingUnknown,
+    missingUnlockedNotes: missingUnlocked,
+    missingUnknownNotes: missingUnknown,
     allUnlocked
   };
 }
@@ -665,8 +665,8 @@ export default function App() {
     const result: ReplicateResult = {
       restoredNoteIds,
       restoredNoteNames,
-      missingUnlockedNotes: analysis.missingUnlocked,
-      missingUnknownNotes: analysis.missingUnknown,
+      missingUnlockedNotes: analysis.missingUnlockedNotes,
+      missingUnknownNotes: analysis.missingUnknownNotes,
       originalNoteCount: creation.notes.length,
       restoredTraits
     };
@@ -1301,7 +1301,7 @@ export default function App() {
               <p className="replicate-subtitle">
                 配方「{replicateSource.name}」
                 {replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length
-                  ? `已部分恢复，可继续调整后封瓶
+                  ? "已部分恢复，可继续调整后封瓶"
                   : "已恢复，你可以继续调整后封瓶"}
               </p>
               <div className="replicate-details">

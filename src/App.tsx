@@ -32,6 +32,15 @@ type Creation = {
   isReplicate?: boolean;
 };
 
+type ReplicateResult = {
+  restoredNoteIds: string[];
+  restoredNoteNames: string[];
+  missingUnlockedNotes: string[];
+  missingUnknownNotes: string[];
+  originalNoteCount: number;
+  restoredTraits: Record<Trait, number>;
+};
+
 const storageKey = "hxwl-1-creations";
 
 const traitLabels: Record<Trait, string> = {
@@ -385,6 +394,46 @@ function describe(traits: Record<Trait, number>, selected: Note[]) {
   return { score, name, description: descriptionMap[topTrait] };
 }
 
+function analyzeReplicability(
+  creation: Creation,
+  unlockedIds: string[]
+): {
+  canReplicate: boolean;
+  isPartial: boolean;
+  unlockedCount: number;
+  missingUnlocked: string[];
+  missingUnknown: string[];
+  allUnlocked: string[];
+} {
+  let unlockedCount = 0;
+  const missingUnlocked: string[] = [];
+  const missingUnknown: string[] = [];
+  const allUnlocked: string[] = [];
+
+  for (const noteName of creation.notes) {
+    const note = getNoteByName(noteName);
+    if (note) {
+      if (unlockedIds.includes(note.id)) {
+        unlockedCount++;
+        allUnlocked.push(note.id);
+      } else {
+        missingUnlocked.push(noteName);
+      }
+    } else {
+      missingUnknown.push(noteName);
+    }
+  }
+
+  return {
+    canReplicate: unlockedCount > 0,
+    isPartial: unlockedCount > 0 && unlockedCount < creation.notes.length,
+    unlockedCount,
+    missingUnlocked,
+    missingUnknown,
+    allUnlocked
+  };
+}
+
 type QuizOption = {
   label: string;
   traitDelta: Partial<Record<Trait, number>>;
@@ -458,6 +507,7 @@ export default function App() {
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [replicateSource, setReplicateSource] = useState<Creation | null>(null);
   const [replicateNotificationOpen, setReplicateNotificationOpen] = useState(false);
+  const [replicateResult, setReplicateResult] = useState<ReplicateResult | null>(null);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -585,32 +635,56 @@ export default function App() {
     setPendingCustomName("");
     setIsEditingName(false);
     setReplicateSource(null);
+    setReplicateResult(null);
   }
 
   function replicateCreation(creation: Creation) {
-    const noteIds: string[] = [];
-    for (const noteName of creation.notes) {
-      const note = getNoteByName(noteName);
-      if (note && unlockedNoteIds.includes(note.id)) {
-        noteIds.push(note.id);
-      }
-    }
-    if (noteIds.length === 0) {
+    const analysis = analyzeReplicability(creation, unlockedNoteIds);
+    if (!analysis.canReplicate) {
       return;
     }
-    const limitedNoteIds = noteIds.slice(0, 5);
-    setSelectedIds(limitedNoteIds);
+
+    const restoredNoteIds = analysis.allUnlocked.slice(0, 5);
+    const restoredNoteNames = restoredNoteIds
+      .map((id) => getNoteById(id)?.name)
+      .filter((n): n is string => !!n);
+
+    const restoredTraits = restoredNoteIds.reduce(
+      (total, noteId) => {
+        const note = getNoteById(noteId);
+        if (note) {
+          (Object.keys(total) as Trait[]).forEach((trait) => {
+            total[trait] += note.traits[trait];
+          });
+        }
+        return total;
+      },
+      { fresh: 0, sweet: 0, wood: 0, spice: 0 }
+    );
+
+    const result: ReplicateResult = {
+      restoredNoteIds,
+      restoredNoteNames,
+      missingUnlockedNotes: analysis.missingUnlocked,
+      missingUnknownNotes: analysis.missingUnknown,
+      originalNoteCount: creation.notes.length,
+      restoredTraits
+    };
+
+    setSelectedIds(restoredNoteIds);
     const replicateName = `${creation.name}（复刻）`;
     setCustomName(replicateName);
     setPendingCustomName(replicateName);
     setIsEditingName(false);
     setReplicateSource(creation);
+    setReplicateResult(result);
     closeCreationDetail();
     setReplicateNotificationOpen(true);
   }
 
   function clearReplicateSource() {
     setReplicateSource(null);
+    setReplicateResult(null);
   }
 
   function handleQuizAnswer(option: QuizOption) {
@@ -724,6 +798,7 @@ export default function App() {
             setPendingCustomName("");
             setIsEditingName(false);
             setReplicateSource(null);
+            setReplicateResult(null);
           }}
         >
           清空调香台
@@ -1062,15 +1137,52 @@ export default function App() {
               <div className="creation-section">
                 <h3>香调列表</h3>
                 <div className="creation-notes">
-                  {(activeCreation.notes || []).map((noteName, index) => (
-                    <span key={index} className="creation-note-tag">
-                      {noteName}
-                    </span>
-                  ))}
+                  {(activeCreation.notes || []).map((noteName, index) => {
+                    const note = getNoteByName(noteName);
+                    const isLocked = note ? !unlockedNoteIds.includes(note.id) : true;
+                    const isUnknown = !note;
+                    return (
+                      <span
+                        key={index}
+                        className={`creation-note-tag ${isLocked ? "note-locked" : ""} ${isUnknown ? "note-unknown" : ""}`}
+                      >
+                        {isLocked && !isUnknown && <span className="note-lock-icon">🔒</span>}
+                        {isUnknown && <span className="note-lock-icon">?</span>}
+                        {noteName}
+                      </span>
+                    );
+                  })}
                   {(!activeCreation.notes || activeCreation.notes.length === 0) && (
                     <span className="creation-note-tag" style={{ opacity: 0.6 }}>无香调记录</span>
                   )}
                 </div>
+                {(() => {
+                  const analysis = analyzeReplicability(activeCreation, unlockedNoteIds);
+                  if (analysis.isPartial || analysis.missingUnknownNotes.length > 0) {
+                    return (
+                      <div className="replicate-warning-box">
+                        {analysis.missingUnlockedNotes.length > 0 && (
+                          <div className="replicate-warning-item">
+                            <span className="warning-icon">🔒</span>
+                            <span>{analysis.missingUnlockedNotes.length} 种香调未解锁：{analysis.missingUnlockedNotes.join("、")}</span>
+                          </div>
+                        )}
+                        {analysis.missingUnknownNotes.length > 0 && (
+                          <div className="replicate-warning-item">
+                            <span className="warning-icon">?</span>
+                            <span>{analysis.missingUnknownNotes.length} 种香调无法识别：{analysis.missingUnknownNotes.join("、")}</span>
+                          </div>
+                        )}
+                        {analysis.canReplicate && (
+                          <div className="replicate-warning-hint">
+                            将仅恢复 {analysis.unlockedCount} 种已解锁香调
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div className="creation-section">
@@ -1109,24 +1221,27 @@ export default function App() {
               </div>
 
               <div className="creation-actions">
-                <button
-                  className="primary-button replicate-action-btn"
-                  onClick={() => replicateCreation(activeCreation)}
-                  disabled={
-                    activeCreation.notes.length === 0 ||
-                    activeCreation.notes.every(
-                      (name) => !getNoteByName(name) || !unlockedNoteIds.includes(getNoteByName(name)!.id)
-                    )
+                {(() => {
+                  const analysis = analyzeReplicability(activeCreation, unlockedNoteIds);
+                  const disabled = activeCreation.notes.length === 0 || !analysis.canReplicate;
+                  let buttonText = "✦ 复刻到调香台";
+                  if (activeCreation.notes.length === 0) {
+                    buttonText = "无香调可复刻";
+                  } else if (!analysis.canReplicate) {
+                    buttonText = "无可复刻香调";
+                  } else if (analysis.isPartial) {
+                    buttonText = `✦ 部分复刻（${analysis.unlockedCount}/${activeCreation.notes.length}种）`;
                   }
-                >
-                  {activeCreation.notes.length === 0
-                    ? "无香调可复刻"
-                    : activeCreation.notes.every(
-                        (name) => !getNoteByName(name) || !unlockedNoteIds.includes(getNoteByName(name)!.id)
-                      )
-                    ? "香调未解锁"
-                    : "✦ 复刻到调香台"}
-                </button>
+                  return (
+                    <button
+                      className={`primary-button replicate-action-btn ${analysis.isPartial ? "partial-btn" : ""}`}
+                      onClick={() => replicateCreation(activeCreation)}
+                      disabled={disabled}
+                    >
+                      {buttonText}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -1172,36 +1287,80 @@ export default function App() {
         </div>
       )}
 
-      {replicateNotificationOpen && replicateSource && (
+      {replicateNotificationOpen && replicateSource && replicateResult && (
         <div className="drawer-overlay replicate-overlay" onClick={() => setReplicateNotificationOpen(false)}>
           <div className="replicate-drawer" onClick={(e) => e.stopPropagation()}>
             <button className="drawer-close" onClick={() => setReplicateNotificationOpen(false)}>×</button>
             <div className="replicate-content">
-              <div className="replicate-icon">✦</div>
-              <h2 className="replicate-title">已复刻到调香台</h2>
+              <div className={`replicate-icon ${replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length ? "partial" : ""}`}>
+                {replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length ? "⚠" : "✦"}
+              </div>
+              <h2 className="replicate-title">
+                {replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length ? "部分复刻到调香台" : "已复刻到调香台"}
+              </h2>
               <p className="replicate-subtitle">
-                配方「{replicateSource.name}」已恢复，你可以继续调整后封瓶
+                配方「{replicateSource.name}」
+                {replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length
+                  ? `已部分恢复，可继续调整后封瓶
+                  : "已恢复，你可以继续调整后封瓶"}
               </p>
               <div className="replicate-details">
                 <div className="replicate-detail-item">
                   <span className="replicate-detail-label">香调数量</span>
-                  <span className="replicate-detail-value">{Math.min(replicateSource.notes.length, 5)} 种</span>
+                  <span className="replicate-detail-value">
+                    {replicateResult.restoredNoteIds.length}
+                    {replicateResult.originalNoteCount > replicateResult.restoredNoteIds.length && (
+                      <span className="replicate-count-original">
+                        {" "}
+                        / {replicateResult.originalNoteCount}
+                      </span>
+                    )}
+                    {" 种"}
+                  </span>
+                </div>
+                <div className="replicate-detail-item">
+                  <span className="replicate-detail-label">已恢复香调</span>
+                  <span className="replicate-detail-value replicate-notes-restored">
+                    {replicateResult.restoredNoteNames.join("、")}
+                  </span>
                 </div>
                 <div className="replicate-detail-item">
                   <span className="replicate-detail-label">新作品名</span>
                   <span className="replicate-detail-value">{replicateSource.name}（复刻）</span>
                 </div>
-                {hasTraits(replicateSource) && (
-                  <div className="replicate-detail-traits">
+                <div className="replicate-detail-traits">
+                  <div className="replicate-traits-label">当前气味性格（已恢复部分）</div>
+                  <div className="replicate-traits-chips">
                     {(Object.keys(traitLabels) as Trait[]).map((trait) => (
                       <span
                         key={trait}
                         className="replicate-trait-chip"
                         style={{ borderColor: getTraitColor(trait) }}
                       >
-                        {traitLabels[trait]} {replicateSource.traits![trait]}
+                        {traitLabels[trait]} {replicateResult.restoredTraits[trait]}
                       </span>
                     ))}
+                  </div>
+                </div>
+                {(replicateResult.missingUnlockedNotes.length > 0 || replicateResult.missingUnknownNotes.length > 0) && (
+                  <div className="replicate-missing-section">
+                    <div className="replicate-missing-title">未恢复的香调：</div>
+                    {replicateResult.missingUnlockedNotes.length > 0 && (
+                      <div className="replicate-missing-item">
+                        <span className="replicate-missing-icon">🔒</span>
+                        <span className="replicate-missing-text">
+                          未解锁：{replicateResult.missingUnlockedNotes.join("、")}
+                        </span>
+                      </div>
+                    )}
+                    {replicateResult.missingUnknownNotes.length > 0 && (
+                      <div className="replicate-missing-item">
+                        <span className="replicate-missing-icon">?</span>
+                        <span className="replicate-missing-text">
+                          无法识别：{replicateResult.missingUnknownNotes.join("、")}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

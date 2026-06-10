@@ -16,7 +16,7 @@ type Creation = {
   originalName: string;
   score: number;
   description: string;
-  traits: Record<Trait, number>;
+  traits?: Record<Trait, number>;
   notes: string[];
 };
 
@@ -110,6 +110,7 @@ export default function App() {
   const [customName, setCustomName] = useState<string>("");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [pendingCustomName, setPendingCustomName] = useState<string>("");
+  const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
 
   const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
   const traits = useMemo(
@@ -135,6 +136,18 @@ export default function App() {
 
   function closeNoteDetail() {
     setActiveNote(null);
+  }
+
+  function openCreationDetail(creation: Creation) {
+    setActiveCreation(creation);
+  }
+
+  function closeCreationDetail() {
+    setActiveCreation(null);
+  }
+
+  function hasTraits(creation: Creation): creation is Creation & { traits: Record<Trait, number> } {
+    return !!(creation.traits && typeof creation.traits === "object" && Object.keys(creation.traits).length > 0);
   }
 
   function addNoteFromDrawer() {
@@ -308,11 +321,11 @@ export default function App() {
           ) : (
             <div className="history-list">
               {history.map((creation) => (
-                <article key={creation.id}>
+                <button key={creation.id} className="history-item" onClick={() => openCreationDetail(creation)}>
                   <span>{creation.score}分</span>
                   <h3>{creation.name}</h3>
                   <p>{creation.notes.join(" / ")}</p>
-                </article>
+                </button>
               ))}
             </div>
           )}
@@ -348,6 +361,81 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {activeCreation && (
+        <div className="drawer-overlay" onClick={closeCreationDetail}>
+          <div className="drawer creation-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={closeCreationDetail}>×</button>
+            <div className="drawer-content">
+              <div className="creation-score-badge">
+                <span className="score-value">{activeCreation.score}</span>
+                <span className="score-label">分</span>
+              </div>
+              <h2 className="drawer-title">{activeCreation.name}</h2>
+              {activeCreation.name !== activeCreation.originalName && (
+                <p className="creation-original-name">原名：{activeCreation.originalName}</p>
+              )}
+              <p className="drawer-profile">{activeCreation.description}</p>
+
+              <div className="creation-section">
+                <h3>香调列表</h3>
+                <div className="creation-notes">
+                  {activeCreation.notes.map((noteName, index) => (
+                    <span key={index} className="creation-note-tag">
+                      {noteName}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="creation-section">
+                <h3>性格分布</h3>
+                {hasTraits(activeCreation) ? (
+                  <div className="creation-traits">
+                    {(Object.keys(traitLabels) as Trait[]).map((trait) => {
+                      const value = activeCreation.traits[trait] ?? 0;
+                      const maxValue = Math.max(...Object.values(activeCreation.traits).filter(v => typeof v === "number"), 1);
+                      return (
+                        <div key={trait} className="trait-bar-item">
+                          <div className="trait-bar-header">
+                            <span className="trait-name">{traitLabels[trait]}</span>
+                            <b className="trait-value">{value}</b>
+                          </div>
+                          <div className="trait-bar-track">
+                            <div
+                              className="trait-bar-fill"
+                              style={{
+                                width: `${(value / maxValue) * 100}%`,
+                                background: getTraitColor(trait)
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="traits-empty">
+                    <span className="traits-empty-icon">✧</span>
+                    <p>暂无性格分布数据</p>
+                    <small>这是旧版本的作品记录，当时还没有性格分析功能。</small>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+function getTraitColor(trait: Trait): string {
+  const colors: Record<Trait, string> = {
+    fresh: "#75c7a5",
+    sweet: "#f4c95d",
+    wood: "#b77b54",
+    spice: "#d96c63"
+  };
+  return colors[trait];
 }

@@ -470,3 +470,169 @@ meter {
     font-size: 1.6rem;
   }
 }
+
+.history-item {
+  background: #fff7ea;
+  border-radius: 8px;
+  padding: 14px;
+  border-left: 5px solid #d96c63;
+  text-align: left;
+  cursor: pointer;
+  border: none;
+  border-left: 5px solid #d96c63;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.history-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(45, 34, 20, 0.12);
+}
+
+.history-item span {
+  float: right;
+  font-weight: 800;
+  color: #7a513f;
+}
+
+.history-item h3 {
+  margin-bottom: 6px;
+}
+
+.history-item p {
+  color: #6d6259;
+  margin: 0;
+}
+
+.creation-score-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  background: linear-gradient(135deg, #78c6a3, #5ea98a);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(120, 198, 163, 0.35);
+}
+
+.score-value {
+  font-size: 2.2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.score-label {
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.creation-original-name {
+  color: #a99e8e;
+  font-style: italic;
+  font-size: 0.95rem;
+  margin-top: -8px;
+  margin-bottom: 16px;
+}
+
+.creation-section {
+  margin-bottom: 28px;
+}
+
+.creation-section h3 {
+  font-size: 1rem;
+  margin-bottom: 14px;
+  color: #7a513f;
+}
+
+.creation-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.creation-note-tag {
+  background: #eadfd2;
+  color: #3f342b;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.creation-traits {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.trait-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trait-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.trait-name {
+  font-size: 0.9rem;
+  color: #5d5248;
+  font-weight: 500;
+}
+
+.trait-value {
+  font-size: 0.95rem;
+  color: #1c1a17;
+  font-weight: 700;
+}
+
+.trait-bar-track {
+  width: 100%;
+  height: 10px;
+  background: #eadfd2;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.trait-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.traits-empty {
+  text-align: center;
+  padding: 28px 20px;
+  background: rgba(234, 223, 210, 0.4);
+  border-radius: 12px;
+  border: 1px dashed rgba(58, 42, 28, 0.2);
+}
+
+.traits-empty-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 10px;
+  opacity: 0.6;
+}
+
+.traits-empty p {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: #5d5248;
+}
+
+.traits-empty small {
+  color: #8a8072;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.creation-drawer .drawer-content {
+  padding-bottom: 40px;
+}

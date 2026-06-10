@@ -167,6 +167,9 @@ export default function App() {
   const [quizStep, setQuizStep] = useState(0);
   const [quizTraits, setQuizTraits] = useState<Record<Trait, number>>({ fresh: 0, sweet: 0, wood: 0, spice: 0 });
   const [quizDone, setQuizDone] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareId1, setCompareId1] = useState<string | null>(null);
+  const [compareId2, setCompareId2] = useState<string | null>(null);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -318,6 +321,42 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  function openCompare() {
+    setCompareOpen(true);
+    if (history.length >= 1 && !compareId1) {
+      setCompareId1(history[0].id);
+    }
+    if (history.length >= 2 && !compareId2) {
+      setCompareId2(history[1].id);
+    }
+  }
+
+  function closeCompare() {
+    setCompareOpen(false);
+  }
+
+  function selectForCompare(slot: 1 | 2, id: string) {
+    if (slot === 1) {
+      if (compareId2 === id) {
+        setCompareId2(compareId1);
+      }
+      setCompareId1(id);
+    } else {
+      if (compareId1 === id) {
+        setCompareId1(compareId2);
+      }
+      setCompareId2(id);
+    }
+  }
+
+  const compareCreation1 = compareId1 ? history.find((c) => c.id === compareId1) || null : null;
+  const compareCreation2 = compareId2 ? history.find((c) => c.id === compareId2) || null : null;
+
+  function getTraitDiff(a: Creation | null, b: Creation | null, trait: Trait): number {
+    if (!a || !b || !hasTraits(a) || !hasTraits(b)) return 0;
+    return a.traits[trait] - b.traits[trait];
   }
 
   return (
@@ -521,13 +560,22 @@ export default function App() {
         <div className="panel history-panel">
           <div className="history-header">
             <h2>最近作品</h2>
-            <button
-              className="ghost-button small export-button"
-              disabled={history.length === 0}
-              onClick={exportCreations}
-            >
-              导出作品
-            </button>
+            <div className="history-actions">
+              <button
+                className="ghost-button small compare-button"
+                disabled={history.length < 2}
+                onClick={openCompare}
+              >
+                配方对比
+              </button>
+              <button
+                className="ghost-button small export-button"
+                disabled={history.length === 0}
+                onClick={exportCreations}
+              >
+                导出作品
+              </button>
+            </div>
           </div>
           {history.length === 0 ? (
             <p className="empty">还没有封瓶作品。</p>
@@ -639,8 +687,224 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {compareOpen && (
+        <div className="drawer-overlay compare-overlay" onClick={closeCompare}>
+          <div className="compare-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close compare-close" onClick={closeCompare}>×</button>
+            <div className="compare-content">
+              <div className="compare-header">
+                <h2 className="compare-title">配方对比台</h2>
+                <p className="compare-subtitle">选择两个作品，并排对比它们的气味性格</p>
+              </div>
+
+              {history.length < 2 ? (
+                <div className="compare-empty">
+                  <span className="compare-empty-icon">✧</span>
+                  <p>至少需要两个封瓶作品才能对比</p>
+                  <small>先去调香台创作几瓶吧～</small>
+                </div>
+              ) : (
+                <>
+                  <div className="compare-selectors">
+                    <div className="compare-selector">
+                      <label className="compare-selector-label">作品 A</label>
+                      <select
+                        className="compare-select"
+                        value={compareId1 || ""}
+                        onChange={(e) => selectForCompare(1, e.target.value)}
+                      >
+                        {history.map((creation) => (
+                          <option key={creation.id} value={creation.id}>
+                            {creation.name} ({creation.score}分)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="compare-vs">
+                      <span>VS</span>
+                    </div>
+                    <div className="compare-selector">
+                      <label className="compare-selector-label">作品 B</label>
+                      <select
+                        className="compare-select"
+                        value={compareId2 || ""}
+                        onChange={(e) => selectForCompare(2, e.target.value)}
+                      >
+                        {history.map((creation) => (
+                          <option key={creation.id} value={creation.id}>
+                            {creation.name} ({creation.score}分)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {compareId1 === compareId2 && (
+                    <div className="compare-warning">
+                      <span>⚠</span>
+                      两个位置选择了同一个作品，差异将显示为零
+                    </div>
+                  )}
+
+                  <div className="compare-grid">
+                    <CompareCard creation={compareCreation1} side="left" />
+                    <CompareCard creation={compareCreation2} side="right" />
+                  </div>
+
+                  <div className="compare-diff-section">
+                    <h3>性格差异对比</h3>
+                    {(Object.keys(traitLabels) as Trait[]).map((trait) => {
+                      const diff = getTraitDiff(compareCreation1, compareCreation2, trait);
+                      const hasBoth = compareCreation1 && compareCreation2 && hasTraits(compareCreation1) && hasTraits(compareCreation2);
+                      const absMax = 12;
+                      return (
+                        <div key={trait} className="compare-diff-row">
+                          <span className="compare-diff-label">{traitLabels[trait]}</span>
+                          <div className="compare-diff-bar">
+                            <div className="compare-diff-left">
+                              {hasBoth && diff < 0 && (
+                                <div
+                                  className="compare-diff-fill left"
+                                  style={{
+                                    width: `${(Math.abs(diff) / absMax) * 100}%`,
+                                    background: getTraitColor(trait)
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <div className="compare-diff-center" />
+                            <div className="compare-diff-right">
+                              {hasBoth && diff > 0 && (
+                                <div
+                                  className="compare-diff-fill right"
+                                  style={{
+                                    width: `${(Math.abs(diff) / absMax) * 100}%`,
+                                    background: getTraitColor(trait)
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                          <span className={`compare-diff-value ${diff > 0 ? "positive" : diff < 0 ? "negative" : ""}`}>
+                            {!hasBoth ? "—" : diff > 0 ? `+${diff}` : diff}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {(!compareCreation1 || !compareCreation2 || !hasTraits(compareCreation1) || !hasTraits(compareCreation2)) && (
+                      <div className="compare-diff-note">
+                        <span>✧</span>
+                        部分作品缺少性格数据，无法计算完整差异
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+function CompareCard({ creation, side }: { creation: Creation | null; side: "left" | "right" }) {
+  if (!creation) {
+    return (
+      <div className={`compare-card compare-card-${side} compare-card-empty`}>
+        <div className="compare-card-placeholder">
+          <span className="compare-empty-icon">✧</span>
+          <p>请选择一个作品</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`compare-card compare-card-${side}`}>
+      <div className="compare-card-header">
+        <div className="compare-card-score">
+          <span className="compare-score-value">{creation.score}</span>
+          <span className="compare-score-label">分</span>
+        </div>
+        <h3 className="compare-card-name">{creation.name}</h3>
+        {creation.name !== creation.originalName && (
+          <p className="compare-card-original">原名：{creation.originalName}</p>
+        )}
+      </div>
+      <p className="compare-card-desc">{creation.description}</p>
+
+      <div className="compare-card-section">
+        <h4>香调组成</h4>
+        <div className="compare-card-notes">
+          {creation.notes.map((noteName, index) => (
+            <span key={index} className="compare-note-tag">
+              {noteName}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="compare-card-section">
+        <h4>性格分布</h4>
+        {hasTraitsStandalone(creation) ? (
+          <div className="compare-card-traits">
+            {(Object.keys(traitLabelsStandalone) as Trait[]).map((trait) => {
+              const value = creation.traits![trait] ?? 0;
+              const maxValue = Math.max(
+                ...Object.values(creation.traits!).filter((v) => typeof v === "number"),
+                1
+              );
+              return (
+                <div key={trait} className="compare-trait-item">
+                  <div className="compare-trait-header">
+                    <span className="compare-trait-name">{traitLabelsStandalone[trait]}</span>
+                    <b className="compare-trait-value">{value}</b>
+                  </div>
+                  <div className="compare-trait-track">
+                    <div
+                      className="compare-trait-fill"
+                      style={{
+                        width: `${(value / maxValue) * 100}%`,
+                        background: getTraitColorStandalone(trait)
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="compare-traits-empty">
+            <span>✧</span>
+            <small>暂无性格数据</small>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function hasTraitsStandalone(creation: Creation): creation is Creation & { traits: Record<Trait, number> } {
+  return !!(creation.traits && typeof creation.traits === "object" && Object.keys(creation.traits).length > 0);
+}
+
+const traitLabelsStandalone: Record<Trait, string> = {
+  fresh: "清新",
+  sweet: "甜度",
+  wood: "木质",
+  spice: "辛辣"
+};
+
+function getTraitColorStandalone(trait: Trait): string {
+  const colors: Record<Trait, string> = {
+    fresh: "#75c7a5",
+    sweet: "#f4c95d",
+    wood: "#b77b54",
+    spice: "#d96c63"
+  };
+  return colors[trait];
 }
 
 function getTraitColor(trait: Trait): string {

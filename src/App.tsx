@@ -13,6 +13,7 @@ type Trait = "fresh" | "sweet" | "wood" | "spice";
 type Creation = {
   id: string;
   name: string;
+  originalName: string;
   score: number;
   description: string;
   traits: Record<Trait, number>;
@@ -106,6 +107,8 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<Creation[]>(loadHistory);
   const [activeNote, setActiveNote] = useState<Note | null>(null);
+  const [customName, setCustomName] = useState<string>("");
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
 
   const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
   const traits = useMemo(
@@ -123,6 +126,7 @@ export default function App() {
   );
 
   const current = selectedNotes.length > 0 ? describe(traits, selectedNotes) : null;
+  const displayName = customName || (current ? current.name : "");
 
   function openNoteDetail(note: Note) {
     setActiveNote(note);
@@ -140,9 +144,11 @@ export default function App() {
 
   function bottleCreation() {
     if (!current || selectedNotes.length === 0) return;
+    const finalName = customName.trim() || current.name;
     const creation: Creation = {
       id: crypto.randomUUID(),
-      name: current.name,
+      name: finalName,
+      originalName: current.name,
       score: current.score,
       description: current.description,
       traits,
@@ -152,6 +158,8 @@ export default function App() {
     setHistory(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
     setSelectedIds([]);
+    setCustomName("");
+    setIsEditingName(false);
   }
 
   return (
@@ -161,7 +169,14 @@ export default function App() {
           <p className="eyebrow">雾瓶调香台</p>
           <h1>把小众气味调成一瓶短诗</h1>
         </div>
-        <button className="ghost-button" onClick={() => setSelectedIds([])}>
+        <button
+          className="ghost-button"
+          onClick={() => {
+            setSelectedIds([]);
+            setCustomName("");
+            setIsEditingName(false);
+          }}
+        >
           清空调香台
         </button>
       </section>
@@ -208,11 +223,77 @@ export default function App() {
             ))}
           </div>
           <div className="result">
-            <strong>{current ? current.name : "未命名试香"}</strong>
-            <p>{current ? current.description : "至少加入一种香调，系统会根据气味性格生成名字和评分。"}</p>
-            <button className="primary-button" disabled={!current} onClick={bottleCreation}>
-              封瓶记录
-            </button>
+            {current ? (
+              <>
+                {isEditingName ? (
+                  <div className="name-editor">
+                    <input
+                      type="text"
+                      className="name-input"
+                      value={customName || current.name}
+                      onChange={(e) => setCustomName(e.target.value)}
+                      placeholder="输入新名称"
+                      autoFocus
+                    />
+                    <div className="name-editor-actions">
+                      <button
+                        className="ghost-button small"
+                        onClick={() => {
+                          setIsEditingName(false);
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        className="primary-button small"
+                        onClick={() => {
+                          setIsEditingName(false);
+                        }}
+                      >
+                        确认
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="name-display">
+                    <strong>{displayName}</strong>
+                    {customName && <span className="original-name">原名：{current.name}</span>}
+                  </div>
+                )}
+                {!isEditingName && (
+                  <div className="name-actions">
+                    <button
+                      className="ghost-button small"
+                      onClick={() => {
+                        setCustomName(displayName);
+                        setIsEditingName(true);
+                      }}
+                    >
+                      改名
+                    </button>
+                    {customName && (
+                      <button
+                        className="ghost-button small"
+                        onClick={() => {
+                          setCustomName("");
+                        }}
+                      >
+                        恢复系统命名
+                      </button>
+                    )}
+                  </div>
+                )}
+                <p>{current.description}</p>
+                <button className="primary-button" disabled={!current} onClick={bottleCreation}>
+                  封瓶记录
+                </button>
+              </>
+            ) : (
+              <>
+                <strong>未命名试香</strong>
+                <p>至少加入一种香调，系统会根据气味性格生成名字和评分。</p>
+              </>
+            )}
           </div>
         </div>
 

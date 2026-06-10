@@ -205,6 +205,82 @@ meter {
   cursor: not-allowed;
 }
 
+.ghost-button.small,
+.primary-button.small {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
+.name-display {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.name-display strong {
+  font-size: 1.5rem;
+  color: #fff6e7;
+}
+
+.original-name {
+  font-size: 0.85rem;
+  color: #a99e8e;
+  font-style: italic;
+}
+
+.name-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.name-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 246, 231, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff6e7;
+  font-size: 1.1rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.name-input::placeholder {
+  color: #8a8072;
+}
+
+.name-input:focus {
+  border-color: #78c6a3;
+}
+
+.name-editor-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.name-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 14px;
+  flex-wrap: wrap;
+}
+
+.name-actions .ghost-button.small {
+  background: rgba(234, 223, 210, 0.15);
+  color: #e9ded0;
+  border: 1px solid rgba(234, 223, 210, 0.25);
+}
+
+.name-actions .ghost-button.small:hover {
+  background: rgba(234, 223, 210, 0.25);
+}
+
 .history-list article {
   background: #fff7ea;
   border-radius: 8px;

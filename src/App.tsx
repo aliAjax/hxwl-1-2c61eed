@@ -6,6 +6,14 @@ type Note = {
   color: string;
   profile: string;
   traits: Record<Trait, number>;
+  isBasic: boolean;
+  unlockCondition?: {
+    type: "trait" | "score";
+    trait?: Trait;
+    minValue?: number;
+    minScore?: number;
+    description: string;
+  };
 };
 
 type Trait = "fresh" | "sweet" | "wood" | "spice";
@@ -36,44 +44,238 @@ const notes: Note[] = [
     name: "雨叶",
     color: "#75c7a5",
     profile: "潮湿、透明、像清晨窗边的绿叶。",
-    traits: { fresh: 4, sweet: 1, wood: 0, spice: 0 }
+    traits: { fresh: 4, sweet: 1, wood: 0, spice: 0 },
+    isBasic: true
   },
   {
     id: "pearjam",
     name: "梨酱",
     color: "#f4c95d",
     profile: "圆润的果甜，能把配方变得柔软。",
-    traits: { fresh: 1, sweet: 4, wood: 0, spice: 0 }
+    traits: { fresh: 1, sweet: 4, wood: 0, spice: 0 },
+    isBasic: true
   },
   {
     id: "cedar",
     name: "雪松屑",
     color: "#b77b54",
     profile: "干燥、安静，给香气一层骨架。",
-    traits: { fresh: 0, sweet: 0, wood: 4, spice: 1 }
+    traits: { fresh: 0, sweet: 0, wood: 4, spice: 1 },
+    isBasic: true
   },
   {
     id: "pepper",
     name: "粉胡椒",
     color: "#d96c63",
     profile: "明亮的刺激感，适合给尾调加火花。",
-    traits: { fresh: 0, sweet: 0, wood: 1, spice: 4 }
+    traits: { fresh: 0, sweet: 0, wood: 1, spice: 4 },
+    isBasic: true
   },
   {
     id: "milkflower",
     name: "奶白花",
     color: "#f7dfda",
     profile: "轻柔花香，甜而不腻。",
-    traits: { fresh: 1, sweet: 3, wood: 0, spice: 1 }
+    traits: { fresh: 1, sweet: 3, wood: 0, spice: 1 },
+    isBasic: true
   },
   {
     id: "smoketea",
     name: "烟茶",
     color: "#8d8f6f",
     profile: "微苦茶烟，适合做成熟的底色。",
-    traits: { fresh: 1, sweet: 0, wood: 3, spice: 2 }
+    traits: { fresh: 1, sweet: 0, wood: 3, spice: 2 },
+    isBasic: true
+  },
+  {
+    id: "bamboodew",
+    name: "竹露",
+    color: "#a8d8c8",
+    profile: "清冷的竹林气息，带着晨露的湿润。",
+    traits: { fresh: 5, sweet: 0, wood: 1, spice: 0 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "fresh",
+      minValue: 6,
+      description: "创作出清新值 ≥ 6 的作品"
+    }
+  },
+  {
+    id: "honeycomb",
+    name: "蜂巢",
+    color: "#e8b84a",
+    profile: "浓厚的蜜香，温暖而有包裹感。",
+    traits: { fresh: 0, sweet: 5, wood: 1, spice: 0 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "sweet",
+      minValue: 6,
+      description: "创作出甜度值 ≥ 6 的作品"
+    }
+  },
+  {
+    id: "sandalwood",
+    name: "檀木",
+    color: "#a06a4a",
+    profile: "醇厚的东方木香，沉稳而神秘。",
+    traits: { fresh: 0, sweet: 1, wood: 5, spice: 0 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "wood",
+      minValue: 6,
+      description: "创作出木质值 ≥ 6 的作品"
+    }
+  },
+  {
+    id: "cinnamon",
+    name: "桂皮",
+    color: "#c45a3a",
+    profile: "温热的辛香，像冬日壁炉旁的气息。",
+    traits: { fresh: 0, sweet: 1, wood: 0, spice: 5 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "spice",
+      minValue: 6,
+      description: "创作出辛辣值 ≥ 6 的作品"
+    }
+  },
+  {
+    id: "jasmine",
+    name: "夜茉莉",
+    color: "#f0e6d2",
+    profile: "夜晚绽放的白花，浓烈而优雅。",
+    traits: { fresh: 2, sweet: 4, wood: 0, spice: 0 },
+    isBasic: false,
+    unlockCondition: {
+      type: "score",
+      minScore: 80,
+      description: "创作出评分 ≥ 80 的作品"
+    }
+  },
+  {
+    id: "oudh",
+    name: "沉香",
+    color: "#6b4a3a",
+    profile: "珍贵的沉香油，深邃而持久。",
+    traits: { fresh: 0, sweet: 0, wood: 4, spice: 3 },
+    isBasic: false,
+    unlockCondition: {
+      type: "score",
+      minScore: 90,
+      description: "创作出评分 ≥ 90 的作品"
+    }
+  },
+  {
+    id: "citruspeel",
+    name: "柑橘皮",
+    color: "#f2a93a",
+    profile: "明亮的柑橘果皮，带着微苦的清新。",
+    traits: { fresh: 3, sweet: 2, wood: 0, spice: 1 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "fresh",
+      minValue: 8,
+      description: "创作出清新值 ≥ 8 的作品"
+    }
+  },
+  {
+    id: "vanillabean",
+    name: "香草豆",
+    color: "#d4a574",
+    profile: "柔滑的香草香气，甜美而温暖。",
+    traits: { fresh: 0, sweet: 4, wood: 2, spice: 0 },
+    isBasic: false,
+    unlockCondition: {
+      type: "trait",
+      trait: "sweet",
+      minValue: 8,
+      description: "创作出甜度值 ≥ 8 的作品"
+    }
   }
 ];
+
+const noteStorageKey = "hxwl-1-unlocked-notes";
+
+function getNoteById(id: string): Note | undefined {
+  return notes.find((n) => n.id === id);
+}
+
+function getNoteByName(name: string): Note | undefined {
+  return notes.find((n) => n.name === name);
+}
+
+function loadUnlockedNotes(): string[] {
+  try {
+    const raw = localStorage.getItem(noteStorageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((id) => typeof id === "string" && getNoteById(id));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return notes.filter((n) => n.isBasic).map((n) => n.id);
+}
+
+function saveUnlockedNotes(ids: string[]) {
+  try {
+    localStorage.setItem(noteStorageKey, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+}
+
+function isNoteUnlocked(noteId: string, unlockedIds: string[]): boolean {
+  return unlockedIds.includes(noteId);
+}
+
+function checkNoteUnlock(
+  note: Note,
+  traits: Record<Trait, number>,
+  score: number
+): boolean {
+  if (note.isBasic) return true;
+  if (!note.unlockCondition) return false;
+
+  const { type, trait, minValue, minScore } = note.unlockCondition;
+  if (type === "trait" && trait && minValue !== undefined) {
+    return traits[trait] >= minValue;
+  }
+  if (type === "score" && minScore !== undefined) {
+    return score >= minScore;
+  }
+  return false;
+}
+
+function getNewlyUnlockedNotes(
+  traits: Record<Trait, number>,
+  score: number,
+  currentUnlockedIds: string[]
+): Note[] {
+  return notes.filter(
+    (note) =>
+      !currentUnlockedIds.includes(note.id) &&
+      checkNoteUnlock(note, traits, score)
+  );
+}
+
+function resolveCreationNoteIds(creation: Creation): string[] {
+  const ids: string[] = [];
+  for (const noteName of creation.notes) {
+    const note = getNoteByName(noteName);
+    if (note) {
+      ids.push(note.id);
+    }
+  }
+  return ids;
+}
 
 function isValidCreation(data: unknown): data is Creation {
   if (!data || typeof data !== "object") return false;
@@ -183,8 +385,9 @@ const quizQuestions: QuizQuestion[] = [
   }
 ];
 
-function recommendNotes(quizTraits: Record<Trait, number>): Note[] {
+function recommendNotes(quizTraits: Record<Trait, number>, unlockedIds: string[]): Note[] {
   return [...notes]
+    .filter((note) => unlockedIds.includes(note.id))
     .map((note) => {
       let score = 0;
       (Object.keys(quizTraits) as Trait[]).forEach((trait) => {
@@ -212,6 +415,10 @@ export default function App() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareId1, setCompareId1] = useState<string | null>(null);
   const [compareId2, setCompareId2] = useState<string | null>(null);
+  const [unlockedNoteIds, setUnlockedNoteIds] = useState<string[]>(loadUnlockedNotes);
+  const [newlyUnlocked, setNewlyUnlocked] = useState<Note[]>([]);
+  const [unlockNotificationOpen, setUnlockNotificationOpen] = useState(false);
+  const [showAllNotes, setShowAllNotes] = useState(false);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -239,7 +446,24 @@ export default function App() {
     };
   }, []);
 
-  const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
+  const unlockedNotes = useMemo(
+    () => notes.filter((note) => unlockedNoteIds.includes(note.id)),
+    [unlockedNoteIds]
+  );
+
+  const lockedNotes = useMemo(
+    () => notes.filter((note) => !unlockedNoteIds.includes(note.id)),
+    [unlockedNoteIds]
+  );
+
+  const displayNotes = useMemo(
+    () => (showAllNotes ? [...unlockedNotes, ...lockedNotes] : unlockedNotes),
+    [showAllNotes, unlockedNotes, lockedNotes]
+  );
+
+  const selectedNotes = selectedIds
+    .map((id) => notes.find((note) => note.id === id)!)
+    .filter(Boolean);
   const traits = useMemo(
     () =>
       selectedNotes.reduce(
@@ -279,6 +503,7 @@ export default function App() {
 
   function addNoteFromDrawer() {
     if (!activeNote || selectedIds.length >= 5) return;
+    if (!unlockedNoteIds.includes(activeNote.id)) return;
     setSelectedIds((items) => [...items, activeNote.id]);
     closeNoteDetail();
   }
@@ -299,6 +524,20 @@ export default function App() {
     const next = [creation, ...history].slice(0, 5);
     setHistory(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
+
+    const newlyUnlockedNotes = getNewlyUnlockedNotes(
+      traits,
+      current.score,
+      unlockedNoteIds
+    );
+    if (newlyUnlockedNotes.length > 0) {
+      const nextUnlocked = [...unlockedNoteIds, ...newlyUnlockedNotes.map((n) => n.id)];
+      setUnlockedNoteIds(nextUnlocked);
+      saveUnlockedNotes(nextUnlocked);
+      setNewlyUnlocked(newlyUnlockedNotes);
+      setUnlockNotificationOpen(true);
+    }
+
     setSelectedIds([]);
     setCustomName("");
     setPendingCustomName("");
@@ -326,7 +565,7 @@ export default function App() {
   }
 
   function applyRecommendation() {
-    const recommended = recommendNotes(quizTraits);
+    const recommended = recommendNotes(quizTraits, unlockedNoteIds);
     const newIds = recommended
       .map((n) => n.id)
       .filter((id) => !selectedIds.includes(id))
@@ -453,7 +692,7 @@ export default function App() {
               <>
                 <p className="quiz-result-label">为你推荐以下香调组合</p>
                 <div className="quiz-recommendations">
-                  {recommendNotes(quizTraits).map((note) => (
+                  {recommendNotes(quizTraits, unlockedNoteIds).map((note) => (
                     <div key={note.id} className="quiz-rec-card">
                       <span className="swatch" style={{ background: note.color }} />
                       <strong>{note.name}</strong>
@@ -484,15 +723,38 @@ export default function App() {
 
       <section className="workspace">
         <div className="panel note-panel">
-          <h2>香调架</h2>
-          <div className="note-grid">
-            {notes.map((note) => (
-              <button key={note.id} className="note-card" onClick={() => openNoteDetail(note)}>
-                <span className="swatch" style={{ background: note.color }} />
-                <strong>{note.name}</strong>
-                <small>{note.profile}</small>
+          <div className="note-panel-header">
+            <h2>香调架</h2>
+            <div className="note-stats">
+              <span className="stat-badge">
+                已解锁 {unlockedNotes.length}/{notes.length}
+              </span>
+              <button
+                className={`ghost-button small toggle-notes-btn ${showAllNotes ? "active" : ""}`}
+                onClick={() => setShowAllNotes(!showAllNotes)}
+              >
+                {showAllNotes ? "隐藏未解锁" : "显示全部"}
               </button>
-            ))}
+            </div>
+          </div>
+          <div className="note-grid">
+            {displayNotes.map((note) => {
+              const unlocked = unlockedNoteIds.includes(note.id);
+              return (
+                <button
+                  key={note.id}
+                  className={`note-card ${!unlocked ? "locked" : ""}`}
+                  onClick={() => openNoteDetail(note)}
+                >
+                  {!unlocked && <div className="lock-overlay"><span className="lock-icon">🔒</span></div>}
+                  <span className="swatch" style={{ background: unlocked ? note.color : "#ccc" }} />
+                  <strong style={{ opacity: unlocked ? 1 : 0.5 }}>{note.name}</strong>
+                  <small style={{ opacity: unlocked ? 1 : 0.5 }}>
+                    {unlocked ? note.profile : note.unlockCondition?.description || "未解锁"}
+                  </small>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -640,25 +902,48 @@ export default function App() {
           <div className="drawer" onClick={(e) => e.stopPropagation()}>
             <button className="drawer-close" onClick={closeNoteDetail}>×</button>
             <div className="drawer-content">
-              <span className="swatch-large" style={{ background: activeNote.color }} />
-              <h2 className="drawer-title">{activeNote.name}</h2>
+              <span
+                className="swatch-large"
+                style={{
+                  background: unlockedNoteIds.includes(activeNote.id)
+                    ? activeNote.color
+                    : "#ccc",
+                  opacity: unlockedNoteIds.includes(activeNote.id) ? 1 : 0.6
+                }}
+              />
+              <h2 className="drawer-title">
+                {activeNote.name}
+                {!unlockedNoteIds.includes(activeNote.id) && (
+                  <span className="locked-badge">🔒 未解锁</span>
+                )}
+              </h2>
               <p className="drawer-profile">{activeNote.profile}</p>
+              {!unlockedNoteIds.includes(activeNote.id) && activeNote.unlockCondition && (
+                <div className="unlock-condition-box">
+                  <h3>解锁条件</h3>
+                  <p>{activeNote.unlockCondition.description}</p>
+                </div>
+              )}
               <div className="drawer-traits">
                 <h3>气味性格</h3>
                 {(Object.keys(activeNote.traits) as Trait[]).map((trait) => (
                   <label key={trait}>
                     <span>{traitLabels[trait]}</span>
-                    <meter min={0} max={4} value={activeNote.traits[trait]} />
+                    <meter min={0} max={5} value={activeNote.traits[trait]} />
                     <b>{activeNote.traits[trait]}</b>
                   </label>
                 ))}
               </div>
               <button
                 className="primary-button drawer-action"
-                disabled={selectedIds.length >= 5}
+                disabled={selectedIds.length >= 5 || !unlockedNoteIds.includes(activeNote.id)}
                 onClick={addNoteFromDrawer}
               >
-                {selectedIds.length >= 5 ? "调香台已满" : "加入调香台"}
+                {!unlockedNoteIds.includes(activeNote.id)
+                  ? "香调未解锁"
+                  : selectedIds.length >= 5
+                  ? "调香台已满"
+                  : "加入调香台"}
               </button>
             </div>
           </div>
@@ -728,6 +1013,45 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unlockNotificationOpen && newlyUnlocked.length > 0 && (
+        <div className="drawer-overlay unlock-overlay" onClick={() => setUnlockNotificationOpen(false)}>
+          <div className="unlock-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setUnlockNotificationOpen(false)}>×</button>
+            <div className="unlock-content">
+              <div className="unlock-celebration">✨</div>
+              <h2 className="unlock-title">恭喜解锁新香调！</h2>
+              <p className="unlock-subtitle">你的作品出色，解锁了新的调香材料</p>
+              <div className="unlock-notes-grid">
+                {newlyUnlocked.map((note) => (
+                  <div key={note.id} className="unlock-note-card">
+                    <span className="swatch-large" style={{ background: note.color }} />
+                    <h3>{note.name}</h3>
+                    <p>{note.profile}</p>
+                    <div className="unlock-note-traits">
+                      {(Object.keys(note.traits) as Trait[]).map((trait) => (
+                        <span
+                          key={trait}
+                          className="unlock-trait-chip"
+                          style={{ borderColor: getTraitColor(trait) }}
+                        >
+                          {traitLabels[trait]} {note.traits[trait]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => setUnlockNotificationOpen(false)}
+              >
+                太棒了！
+              </button>
             </div>
           </div>
         </div>

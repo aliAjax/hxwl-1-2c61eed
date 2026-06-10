@@ -77,6 +77,37 @@ h1 {
   gap: 12px;
 }
 
+.note-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.note-panel-header h2 {
+  margin-bottom: 0;
+}
+
+.note-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.stat-badge {
+  background: rgba(120, 198, 163, 0.15);
+  color: #3f6b56;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.toggle-notes-btn.active {
+  background: #78c6a3 !important;
+  color: #12261c !important;
+}
+
 .note-card {
   min-height: 116px;
   border: 1px solid rgba(45, 34, 20, 0.12);
@@ -85,10 +116,201 @@ h1 {
   padding: 14px;
   text-align: left;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
 
 .note-card:hover {
   transform: translateY(-2px);
+}
+
+.note-card.locked {
+  cursor: not-allowed;
+  background: #f5f0e6;
+}
+
+.note-card.locked:hover {
+  transform: none;
+}
+
+.lock-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+}
+
+.lock-icon {
+  font-size: 1.1rem;
+  opacity: 0.7;
+}
+
+.locked-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 4px 10px;
+  background: rgba(234, 223, 210, 0.6);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #7a513f;
+}
+
+.unlock-condition-box {
+  background: rgba(244, 201, 93, 0.1);
+  border: 1px dashed rgba(244, 201, 93, 0.4);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+}
+
+.unlock-condition-box h3 {
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  color: #7a5a1f;
+}
+
+.unlock-condition-box p {
+  margin: 0;
+  color: #5d5248;
+  font-size: 0.95rem;
+}
+
+.unlock-overlay {
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.unlock-drawer {
+  width: 560px;
+  max-width: 100%;
+  max-height: 90vh;
+  background: #fffaf0;
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(45, 34, 20, 0.3);
+  position: relative;
+  animation: bounceIn 0.4s ease;
+  overflow-y: auto;
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.unlock-content {
+  padding: 40px 32px 32px;
+  text-align: center;
+}
+
+.unlock-celebration {
+  font-size: 3.5rem;
+  margin-bottom: 12px;
+  animation: sparkle 1.5s ease infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.2) rotate(10deg);
+  }
+}
+
+.unlock-title {
+  font-size: 1.8rem;
+  margin-bottom: 6px;
+  color: #1c1a17;
+}
+
+.unlock-subtitle {
+  color: #6d6259;
+  margin-bottom: 24px;
+}
+
+.unlock-notes-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.unlock-note-card {
+  background: linear-gradient(135deg, #fff7ea 0%, #fff2dc 100%);
+  border: 1px solid rgba(58, 42, 28, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.unlock-note-card .swatch-large {
+  margin: 0 auto 12px;
+}
+
+.unlock-note-card h3 {
+  margin-bottom: 6px;
+  color: #1c1a17;
+}
+
+.unlock-note-card p {
+  color: #6d6259;
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+
+.unlock-note-traits {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.unlock-trait-chip {
+  padding: 4px 10px;
+  border: 2px solid;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #3f342b;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 560px) {
+  .note-panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .note-stats {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .unlock-content {
+    padding: 32px 20px 24px;
+  }
+
+  .unlock-title {
+    font-size: 1.4rem;
+  }
+
+  .unlock-drawer {
+    width: 100%;
+    max-height: 95vh;
+    border-radius: 16px 16px 0 0;
+    animation: slideInUp 0.3s ease;
+  }
 }
 
 .swatch {

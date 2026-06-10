@@ -508,6 +508,10 @@ export default function App() {
   const [replicateSource, setReplicateSource] = useState<Creation | null>(null);
   const [replicateNotificationOpen, setReplicateNotificationOpen] = useState(false);
   const [replicateResult, setReplicateResult] = useState<ReplicateResult | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+  const [calendarSelectedDay, setCalendarSelectedDay] = useState<number | null>(null);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -1026,6 +1030,12 @@ export default function App() {
             <h2>最近作品</h2>
             <div className="history-actions">
               <button
+                className="ghost-button small calendar-toggle-button"
+                onClick={() => { setCalendarOpen(!calendarOpen); setCalendarSelectedDay(null); }}
+              >
+                {calendarOpen ? "返回列表" : "气味日记"}
+              </button>
+              <button
                 className="ghost-button small compare-button"
                 disabled={history.length < 2}
                 onClick={openCompare}
@@ -1041,7 +1051,174 @@ export default function App() {
               </button>
             </div>
           </div>
-          {history.length === 0 ? (
+          {calendarOpen ? (
+            <div className="calendar-view">
+              {(() => {
+                const creationsByDate = new Map<string, Creation[]>();
+                history.forEach((c) => {
+                  let dateStr: string;
+                  try {
+                    const d = new Date(c.createdAt);
+                    if (isNaN(d.getTime())) dateStr = "";
+                    else dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  } catch {
+                    dateStr = "";
+                  }
+                  if (!dateStr) return;
+                  const arr = creationsByDate.get(dateStr) || [];
+                  arr.push(c);
+                  creationsByDate.set(dateStr, arr);
+                });
+
+                const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+                const firstDayOfWeek = new Date(calendarYear, calendarMonth, 1).getDay();
+                const today = new Date();
+                const isCurrentMonth = today.getFullYear() === calendarYear && today.getMonth() === calendarMonth;
+                const todayDate = today.getDate();
+
+                function getDominantTraitLabel(creations: Creation[]): string | null {
+                  const totals: Record<Trait, number> = { fresh: 0, sweet: 0, wood: 0, spice: 0 };
+                  let hasAny = false;
+                  for (const c of creations) {
+                    if (c.traits) {
+                      (Object.keys(totals) as Trait[]).forEach((t) => {
+                        totals[t] += c.traits![t] ?? 0;
+                      });
+                      hasAny = true;
+                    }
+                  }
+                  if (!hasAny) return null;
+                  const top = (Object.keys(totals) as Trait[]).sort((a, b) => totals[b] - totals[a])[0];
+                  return traitLabels[top];
+                }
+
+                const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+                const monthNames = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+
+                const selectedDateStr = calendarSelectedDay !== null
+                  ? `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(calendarSelectedDay).padStart(2, "0")}`
+                  : null;
+                const selectedDayCreations = selectedDateStr ? (creationsByDate.get(selectedDateStr) || []) : [];
+
+                return (
+                  <>
+                    <div className="calendar-nav">
+                      <button
+                        className="ghost-button small calendar-nav-btn"
+                        onClick={() => {
+                          let m = calendarMonth - 1;
+                          let y = calendarYear;
+                          if (m < 0) { m = 11; y--; }
+                          setCalendarMonth(m);
+                          setCalendarYear(y);
+                          setCalendarSelectedDay(null);
+                        }}
+                      >
+                        ◀
+                      </button>
+                      <span className="calendar-month-label">{calendarYear}年 {monthNames[calendarMonth]}</span>
+                      <button
+                        className="ghost-button small calendar-nav-btn"
+                        onClick={() => {
+                          let m = calendarMonth + 1;
+                          let y = calendarYear;
+                          if (m > 11) { m = 0; y++; }
+                          setCalendarMonth(m);
+                          setCalendarYear(y);
+                          setCalendarSelectedDay(null);
+                        }}
+                      >
+                        ▶
+                      </button>
+                    </div>
+                    <div className="calendar-weekdays">
+                      {weekdays.map((d) => (
+                        <span key={d} className="calendar-weekday">{d}</span>
+                      ))}
+                    </div>
+                    <div className="calendar-grid">
+                      {Array.from({ length: firstDayOfWeek }, (_, i) => (
+                        <span key={`empty-${i}`} className="calendar-cell empty" />
+                      ))}
+                      {Array.from({ length: daysInMonth }, (_, i) => {
+                        const day = i + 1;
+                        const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                        const dayCreations = creationsByDate.get(dateStr) || [];
+                        const hasCreations = dayCreations.length > 0;
+                        const isToday = isCurrentMonth && day === todayDate;
+                        const isSelected = calendarSelectedDay === day;
+                        const dominant = hasCreations ? getDominantTraitLabel(dayCreations) : null;
+                        let dotColor = "#b77b54";
+                        if (dominant === "清新") dotColor = "#75c7a5";
+                        else if (dominant === "甜度") dotColor = "#f4c95d";
+                        else if (dominant === "辛辣") dotColor = "#d96c63";
+
+                        return (
+                          <button
+                            key={day}
+                            className={`calendar-cell ${hasCreations ? "has-creations" : ""} ${isToday ? "is-today" : ""} ${isSelected ? "is-selected" : ""}`}
+                            onClick={() => setCalendarSelectedDay(isSelected ? null : day)}
+                          >
+                            <span className="calendar-day-number">{day}</span>
+                            {hasCreations && (
+                              <span className="calendar-dot" style={{ background: dotColor }} />
+                            )}
+                            {hasCreations && (
+                              <span className="calendar-day-count">{dayCreations.length}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {history.length === 0 && (
+                      <div className="calendar-empty">
+                        <span className="calendar-empty-icon">✧</span>
+                        <p>还没有封瓶记录</p>
+                        <small>在调香台创作并封瓶后，你的气味日记就会出现在这里</small>
+                      </div>
+                    )}
+                    {calendarSelectedDay !== null && selectedDayCreations.length > 0 && (
+                      <div className="calendar-day-detail">
+                        <div className="calendar-day-detail-header">
+                          <h3>{calendarMonth + 1}月{calendarSelectedDay}日</h3>
+                          {(() => {
+                            const dom = getDominantTraitLabel(selectedDayCreations);
+                            return dom ? <span className="calendar-tendency">倾向：{dom}</span> : null;
+                          })()}
+                        </div>
+                        <div className="calendar-day-creations">
+                          {selectedDayCreations.map((c) => (
+                            <button
+                              key={c.id}
+                              className={`calendar-creation-item ${c.isReplicate ? "replicate-item" : ""}`}
+                              onClick={() => openCreationDetail(c)}
+                            >
+                              <span className="calendar-creation-score">{c.score}分</span>
+                              <div className="calendar-creation-info">
+                                <strong>
+                                  {c.name}
+                                  {c.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
+                                </strong>
+                                <span className="calendar-creation-notes">{(c.notes || []).join(" / ") || "无香调记录"}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {calendarSelectedDay !== null && selectedDayCreations.length === 0 && (
+                      <div className="calendar-day-detail">
+                        <div className="calendar-day-detail-header">
+                          <h3>{calendarMonth + 1}月{calendarSelectedDay}日</h3>
+                        </div>
+                        <p className="calendar-day-empty">这天没有封瓶记录</p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          ) : history.length === 0 ? (
             <p className="empty">还没有封瓶作品。</p>
           ) : (
             <div className="history-list">

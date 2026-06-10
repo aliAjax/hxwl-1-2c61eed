@@ -75,9 +75,51 @@ const notes: Note[] = [
   }
 ];
 
+function isValidCreation(data: unknown): data is Creation {
+  if (!data || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    typeof obj.id === "string" &&
+    typeof obj.name === "string" &&
+    typeof obj.score === "number" &&
+    typeof obj.description === "string" &&
+    Array.isArray(obj.notes)
+  );
+}
+
+function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
+  const safeNotes = Array.isArray(data.notes) ? data.notes.filter((n) => typeof n === "string") : [];
+  const safeTraits = (data.traits && typeof data.traits === "object")
+    ? {
+        fresh: typeof data.traits.fresh === "number" && isFinite(data.traits.fresh) ? data.traits.fresh : 0,
+        sweet: typeof data.traits.sweet === "number" && isFinite(data.traits.sweet) ? data.traits.sweet : 0,
+        wood: typeof data.traits.wood === "number" && isFinite(data.traits.wood) ? data.traits.wood : 0,
+        spice: typeof data.traits.spice === "number" && isFinite(data.traits.spice) ? data.traits.spice : 0
+      }
+    : undefined;
+  const hasAnyTrait = safeTraits && (safeTraits.fresh + safeTraits.sweet + safeTraits.wood + safeTraits.spice) > 0;
+  return {
+    id: data.id,
+    name: typeof data.name === "string" && data.name ? data.name : "未命名作品",
+    originalName: typeof data.originalName === "string" && data.originalName ? data.originalName : (typeof data.name === "string" && data.name ? data.name : "未命名作品"),
+    score: typeof data.score === "number" && isFinite(data.score) ? data.score : 0,
+    description: typeof data.description === "string" && data.description ? data.description : "暂无描述",
+    traits: hasAnyTrait ? safeTraits : undefined,
+    notes: safeNotes,
+    createdAt: typeof data.createdAt === "string" && data.createdAt ? data.createdAt : new Date().toISOString()
+  };
+}
+
 function loadHistory(): Creation[] {
   try {
-    return JSON.parse(localStorage.getItem(storageKey) || "[]") as Creation[];
+    const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item): item is Partial<Creation> & { id: string } => {
+        return item && typeof item === "object" && typeof (item as { id?: string }).id === "string";
+      })
+      .map(normalizeCreation)
+      .filter((item) => item.notes.length > 0 || item.score > 0);
   } catch {
     return [];
   }
@@ -585,7 +627,7 @@ export default function App() {
                 <button key={creation.id} className="history-item" onClick={() => openCreationDetail(creation)}>
                   <span>{creation.score}分</span>
                   <h3>{creation.name}</h3>
-                  <p>{creation.notes.join(" / ")}</p>
+                  <p>{(creation.notes || []).join(" / ") || "无香调记录"}</p>
                 </button>
               ))}
             </div>
@@ -633,7 +675,7 @@ export default function App() {
                 <span className="score-label">分</span>
               </div>
               <h2 className="drawer-title">{activeCreation.name}</h2>
-              {activeCreation.name !== activeCreation.originalName && (
+              {activeCreation.originalName && activeCreation.name !== activeCreation.originalName && (
                 <p className="creation-original-name">原名：{activeCreation.originalName}</p>
               )}
               <p className="drawer-profile">{activeCreation.description}</p>
@@ -641,11 +683,14 @@ export default function App() {
               <div className="creation-section">
                 <h3>香调列表</h3>
                 <div className="creation-notes">
-                  {activeCreation.notes.map((noteName, index) => (
+                  {(activeCreation.notes || []).map((noteName, index) => (
                     <span key={index} className="creation-note-tag">
                       {noteName}
                     </span>
                   ))}
+                  {(!activeCreation.notes || activeCreation.notes.length === 0) && (
+                    <span className="creation-note-tag" style={{ opacity: 0.6 }}>无香调记录</span>
+                  )}
                 </div>
               </div>
 
@@ -716,7 +761,7 @@ export default function App() {
                       >
                         {history.map((creation) => (
                           <option key={creation.id} value={creation.id}>
-                            {creation.name} ({creation.score}分)
+                            {creation.name || "未命名作品"} ({creation.score ?? 0}分)
                           </option>
                         ))}
                       </select>
@@ -733,7 +778,7 @@ export default function App() {
                       >
                         {history.map((creation) => (
                           <option key={creation.id} value={creation.id}>
-                            {creation.name} ({creation.score}分)
+                            {creation.name || "未命名作品"} ({creation.score ?? 0}分)
                           </option>
                         ))}
                       </select>
@@ -829,7 +874,7 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
           <span className="compare-score-label">分</span>
         </div>
         <h3 className="compare-card-name">{creation.name}</h3>
-        {creation.name !== creation.originalName && (
+        {creation.originalName && creation.name !== creation.originalName && (
           <p className="compare-card-original">原名：{creation.originalName}</p>
         )}
       </div>
@@ -838,11 +883,14 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
       <div className="compare-card-section">
         <h4>香调组成</h4>
         <div className="compare-card-notes">
-          {creation.notes.map((noteName, index) => (
+          {(creation.notes || []).map((noteName, index) => (
             <span key={index} className="compare-note-tag">
               {noteName}
             </span>
           ))}
+          {(!creation.notes || creation.notes.length === 0) && (
+            <span className="compare-note-tag" style={{ opacity: 0.6 }}>无香调记录</span>
+          )}
         </div>
       </div>
 

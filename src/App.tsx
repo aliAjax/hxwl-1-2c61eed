@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Note = {
   id: string;
@@ -113,6 +113,32 @@ export default function App() {
   const [pendingCustomName, setPendingCustomName] = useState<string>("");
   const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
 
+  useEffect(() => {
+    const syncHistory = () => {
+      setHistory(loadHistory());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === storageKey) {
+        syncHistory();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncHistory();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", syncHistory);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", syncHistory);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
   const traits = useMemo(
     () =>
@@ -180,8 +206,13 @@ export default function App() {
   }
 
   function exportCreations() {
-    if (history.length === 0) return;
-    const exportData = history.map((creation) => ({
+    const storedCreations = loadHistory();
+    if (storedCreations.length === 0) {
+      setHistory([]);
+      return;
+    }
+    setHistory(storedCreations);
+    const exportData = storedCreations.map((creation) => ({
       name: creation.name,
       score: creation.score,
       description: creation.description,

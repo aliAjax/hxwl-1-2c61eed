@@ -109,6 +109,7 @@ export default function App() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [customName, setCustomName] = useState<string>("");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [pendingCustomName, setPendingCustomName] = useState<string>("");
 
   const selectedNotes = selectedIds.map((id) => notes.find((note) => note.id === id)!).filter(Boolean);
   const traits = useMemo(
@@ -159,6 +160,7 @@ export default function App() {
     localStorage.setItem(storageKey, JSON.stringify(next));
     setSelectedIds([]);
     setCustomName("");
+    setPendingCustomName("");
     setIsEditingName(false);
   }
 
@@ -174,6 +176,7 @@ export default function App() {
           onClick={() => {
             setSelectedIds([]);
             setCustomName("");
+            setPendingCustomName("");
             setIsEditingName(false);
           }}
         >
@@ -230,8 +233,8 @@ export default function App() {
                     <input
                       type="text"
                       className="name-input"
-                      value={customName || current.name}
-                      onChange={(e) => setCustomName(e.target.value)}
+                      value={pendingCustomName}
+                      onChange={(e) => setPendingCustomName(e.target.value)}
                       placeholder="输入新名称"
                       autoFocus
                     />
@@ -247,6 +250,7 @@ export default function App() {
                       <button
                         className="primary-button small"
                         onClick={() => {
+                          setCustomName(pendingCustomName.trim() === current.name ? "" : pendingCustomName);
                           setIsEditingName(false);
                         }}
                       >
@@ -265,7 +269,7 @@ export default function App() {
                     <button
                       className="ghost-button small"
                       onClick={() => {
-                        setCustomName(displayName);
+                        setPendingCustomName(displayName);
                         setIsEditingName(true);
                       }}
                     >

@@ -104,6 +104,57 @@ function describe(traits: Record<Trait, number>, selected: Note[]) {
   return { score, name, description: descriptionMap[topTrait] };
 }
 
+type QuizOption = {
+  label: string;
+  traitDelta: Partial<Record<Trait, number>>;
+};
+
+type QuizQuestion = {
+  question: string;
+  options: QuizOption[];
+};
+
+const quizQuestions: QuizQuestion[] = [
+  {
+    question: "今天想要什么样的感觉？",
+    options: [
+      { label: "清冷通透", traitDelta: { fresh: 3 } },
+      { label: "甜暖柔软", traitDelta: { sweet: 3 } },
+      { label: "都想试试", traitDelta: { fresh: 1, sweet: 1 } }
+    ]
+  },
+  {
+    question: "更偏爱哪种底色？",
+    options: [
+      { label: "木质沉稳", traitDelta: { wood: 3 } },
+      { label: "辛辣个性", traitDelta: { spice: 3 } },
+      { label: "温和不刺激", traitDelta: { wood: 1, spice: 1 } }
+    ]
+  },
+  {
+    question: "香气的浓淡偏好？",
+    options: [
+      { label: "轻透淡雅", traitDelta: { fresh: 2 } },
+      { label: "刚好就好", traitDelta: {} },
+      { label: "浓郁有存在感", traitDelta: { sweet: 1, wood: 1, spice: 1 } }
+    ]
+  }
+];
+
+function recommendNotes(quizTraits: Record<Trait, number>): Note[] {
+  return [...notes]
+    .map((note) => {
+      let score = 0;
+      (Object.keys(quizTraits) as Trait[]).forEach((trait) => {
+        score += note.traits[trait] * quizTraits[trait];
+      });
+      return { note, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((item) => item.note);
+}
+
 export default function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [history, setHistory] = useState<Creation[]>(loadHistory);
@@ -112,6 +163,10 @@ export default function App() {
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [pendingCustomName, setPendingCustomName] = useState<string>("");
   const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
+  const [quizOpen, setQuizOpen] = useState(false);
+  const [quizStep, setQuizStep] = useState(0);
+  const [quizTraits, setQuizTraits] = useState<Record<Trait, number>>({ fresh: 0, sweet: 0, wood: 0, spice: 0 });
+  const [quizDone, setQuizDone] = useState(false);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -205,6 +260,39 @@ export default function App() {
     setIsEditingName(false);
   }
 
+  function handleQuizAnswer(option: QuizOption) {
+    const next = { ...quizTraits };
+    (Object.keys(option.traitDelta) as Trait[]).forEach((trait) => {
+      next[trait] += option.traitDelta[trait] ?? 0;
+    });
+    if (quizStep < quizQuestions.length - 1) {
+      setQuizTraits(next);
+      setQuizStep(quizStep + 1);
+    } else {
+      setQuizTraits(next);
+      setQuizDone(true);
+    }
+  }
+
+  function resetQuiz() {
+    setQuizStep(0);
+    setQuizTraits({ fresh: 0, sweet: 0, wood: 0, spice: 0 });
+    setQuizDone(false);
+  }
+
+  function applyRecommendation() {
+    const recommended = recommendNotes(quizTraits);
+    const newIds = recommended
+      .map((n) => n.id)
+      .filter((id) => !selectedIds.includes(id))
+      .slice(0, 5 - selectedIds.length);
+    if (newIds.length > 0) {
+      setSelectedIds((ids) => [...ids, ...newIds]);
+    }
+    setQuizOpen(false);
+    resetQuiz();
+  }
+
   function exportCreations() {
     const storedCreations = loadHistory();
     if (storedCreations.length === 0) {
@@ -250,6 +338,67 @@ export default function App() {
         >
           清空调香台
         </button>
+      </section>
+
+      <section className="quiz-section">
+        {!quizOpen ? (
+          <button className="quiz-toggle" onClick={() => setQuizOpen(true)}>
+            <span className="quiz-toggle-icon">✦</span>
+            气味心情问答推荐
+          </button>
+        ) : (
+          <div className="quiz-panel">
+            <div className="quiz-header">
+              <h2>气味心情问答</h2>
+              <button className="drawer-close quiz-close" onClick={() => { setQuizOpen(false); resetQuiz(); }}>×</button>
+            </div>
+            {!quizDone ? (
+              <>
+                <div className="quiz-progress">
+                  {quizQuestions.map((_, i) => (
+                    <span key={i} className={`quiz-dot ${i <= quizStep ? "active" : ""} ${i < quizStep ? "done" : ""}`} />
+                  ))}
+                </div>
+                <p className="quiz-question">{quizQuestions[quizStep].question}</p>
+                <div className="quiz-options">
+                  {quizQuestions[quizStep].options.map((option, i) => (
+                    <button key={i} className="quiz-option" onClick={() => handleQuizAnswer(option)}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="quiz-result-label">为你推荐以下香调组合</p>
+                <div className="quiz-recommendations">
+                  {recommendNotes(quizTraits).map((note) => (
+                    <div key={note.id} className="quiz-rec-card">
+                      <span className="swatch" style={{ background: note.color }} />
+                      <strong>{note.name}</strong>
+                      <small>{note.profile}</small>
+                    </div>
+                  ))}
+                </div>
+                <div className="quiz-traits-preview">
+                  {(Object.keys(quizTraits) as Trait[]).map((trait) => (
+                    <span key={trait} className="quiz-trait-chip" style={{ borderColor: getTraitColor(trait) }}>
+                      {traitLabels[trait]} {quizTraits[trait]}
+                    </span>
+                  ))}
+                </div>
+                <div className="quiz-actions">
+                  <button className="primary-button" onClick={applyRecommendation}>
+                    一键放入调香台
+                  </button>
+                  <button className="ghost-button" onClick={resetQuiz}>
+                    重新作答
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="workspace">

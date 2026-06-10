@@ -18,6 +18,11 @@ type Note = {
 
 type Trait = "fresh" | "sweet" | "wood" | "spice";
 
+type SelectedNote = {
+  noteId: string;
+  drops: number;
+};
+
 type Creation = {
   id: string;
   name: string;
@@ -26,6 +31,7 @@ type Creation = {
   description: string;
   traits?: Record<Trait, number>;
   notes: string[];
+  noteDrops?: Record<string, number>;
   createdAt: string;
   sourceCreationId?: string;
   sourceCreationName?: string;
@@ -35,6 +41,7 @@ type Creation = {
 type ReplicateResult = {
   restoredNoteIds: string[];
   restoredNoteNames: string[];
+  restoredNoteDrops: Record<string, number>;
   missingUnlockedNotes: string[];
   missingUnknownNotes: string[];
   originalNoteCount: number;
@@ -42,6 +49,13 @@ type ReplicateResult = {
 };
 
 const storageKey = "hxwl-1-creations";
+
+const MAX_NOTES = 5;
+const MIN_DROPS_PER_NOTE = 1;
+const MAX_DROPS_PER_NOTE = 10;
+const MIN_TOTAL_DROPS = 2;
+const MAX_TOTAL_DROPS = 30;
+const DEFAULT_DROPS = 1;
 
 const traitLabels: Record<Trait, string> = {
   fresh: "清新",
@@ -315,6 +329,16 @@ function resolveCreationNoteIdsLegacy(notes: string[]): string[] {
 function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
   const safeNotes = Array.isArray(data.notes) ? data.notes.filter((n) => typeof n === "string") : [];
 
+  let safeNoteDrops: Record<string, number> | undefined;
+  if (data.noteDrops && typeof data.noteDrops === "object") {
+    safeNoteDrops = {};
+    for (const [k, v] of Object.entries(data.noteDrops)) {
+      if (typeof v === "number" && isFinite(v) && v > 0) {
+        safeNoteDrops[k] = Math.min(Math.round(v), MAX_DROPS_PER_NOTE);
+      }
+    }
+  }
+
   let safeTraits: Record<Trait, number> | undefined;
   if (data.traits && typeof data.traits === "object") {
     safeTraits = {
@@ -326,12 +350,14 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
   } else if (safeNotes.length > 0) {
     const noteIds = resolveCreationNoteIdsLegacy(safeNotes);
     if (noteIds.length > 0) {
+      const dropsMap = safeNoteDrops && Object.keys(safeNoteDrops).length > 0 ? safeNoteDrops : null;
       const computedTraits = noteIds.reduce(
         (total, noteId) => {
           const note = getNoteById(noteId);
           if (note) {
+            const drops = dropsMap ? (dropsMap[noteId] || dropsMap[note.name] || DEFAULT_DROPS) : DEFAULT_DROPS;
             (Object.keys(total) as Trait[]).forEach((trait) => {
-              total[trait] += note.traits[trait];
+              total[trait] += note.traits[trait] * drops;
             });
           }
           return total;
@@ -339,6 +365,13 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
         { fresh: 0, sweet: 0, wood: 0, spice: 0 }
       );
       safeTraits = computedTraits;
+      if (!safeNoteDrops || Object.keys(safeNoteDrops).length === 0) {
+        safeNoteDrops = {};
+        noteIds.forEach((id) => {
+          const note = getNoteById(id);
+          if (note) safeNoteDrops![note.name] = DEFAULT_DROPS;
+        });
+      }
     }
   }
   const hasAnyTrait = safeTraits && (safeTraits.fresh + safeTraits.sweet + safeTraits.wood + safeTraits.spice) > 0;
@@ -351,11 +384,42 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
     description: typeof data.description === "string" && data.description ? data.description : "暂无描述",
     traits: hasAnyTrait ? safeTraits : undefined,
     notes: safeNotes,
+    noteDrops: safeNoteDrops,
     createdAt: typeof data.createdAt === "string" && data.createdAt ? data.createdAt : new Date().toISOString(),
     sourceCreationId: typeof data.sourceCreationId === "string" && data.sourceCreationId ? data.sourceCreationId : undefined,
     sourceCreationName: typeof data.sourceCreationName === "string" && data.sourceCreationName ? data.sourceCreationName : undefined,
     isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false
   };
+}
+
+function getCreationNoteDrops(creation: Creation): Record<string, number> {
+  if (creation.noteDrops && Object.keys(creation.noteDrops).length > 0) {
+    return creation.noteDrops;
+  }
+  const drops: Record<string, number> = {};
+  creation.notes.forEach((name) => {
+    drops[name] = DEFAULT_DROPS;
+  });
+  return drops;
+}
+
+function computeTraitsFromSelected(selected: SelectedNote[]): Record<Trait, number> {
+  return selected.reduce(
+    (total, item) => {
+      const note = getNoteById(item.noteId);
+      if (note) {
+        (Object.keys(total) as Trait[]).forEach((trait) => {
+          total[trait] += note.traits[trait] * item.drops;
+        });
+      }
+      return total;
+    },
+    { fresh: 0, sweet: 0, wood: 0, spice: 0 }
+  );
+}
+
+function getTotalDrops(selected: SelectedNote[]): number {
+  return selected.reduce((sum, item) => sum + item.drops, 0);
 }
 
 function loadHistory(): Creation[] {
@@ -373,25 +437,33 @@ function loadHistory(): Creation[] {
   }
 }
 
-function describe(traits: Record<Trait, number>, selected: Note[]) {
+function describe(traits: Record<Trait, number>, selected: SelectedNote[]) {
   const topTrait = (Object.keys(traits) as Trait[]).sort((a, b) => traits[b] - traits[a])[0];
-  const balance = Object.values(traits).filter((value) => value >= 3).length;
-  const score = Math.min(98, 54 + selected.length * 8 + balance * 5 + Math.max(...Object.values(traits)));
+  const totalDrops = getTotalDrops(selected);
+  const uniqueNotes = selected.length;
+  const balancedTraits = Object.values(traits).filter((value) => value >= Math.max(...Object.values(traits)) * 0.4).length;
+
+  const maxTraitValue = Math.max(...Object.values(traits));
+  const dropDiversityBonus = uniqueNotes >= 4 ? 8 : uniqueNotes >= 3 ? 5 : uniqueNotes >= 2 ? 3 : 0;
+  const concentrationBonus = Math.min(totalDrops * 1.2, 18);
+  const balanceBonus = balancedTraits * 4;
+  const score = Math.min(98, 40 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20));
+
   const nameParts: Record<Trait, string[]> = {
     fresh: ["晨雾", "玻璃雨", "青叶"],
     sweet: ["糖梨", "柔光", "蜜径"],
     wood: ["木匣", "旧书", "雪松"],
     spice: ["火星", "胡椒月", "赤信"]
   };
-  const suffix = selected.length >= 4 ? "复调" : selected.length >= 2 ? "短诗" : "试香";
-  const name = `${nameParts[topTrait][traits[topTrait] % 3]}${suffix}`;
+  const suffix = totalDrops >= 15 ? "浓香水" : totalDrops >= 8 ? "淡香精" : uniqueNotes >= 4 ? "复调" : uniqueNotes >= 2 ? "短诗" : "试香";
+  const name = `${nameParts[topTrait][Math.floor(traits[topTrait] / 3) % 3]}${suffix}`;
   const descriptionMap: Record<Trait, string> = {
     fresh: "像刚打开的窗，干净、轻快，适合雨后出门。",
     sweet: "有柔软的果香和一点暖意，像藏在衣袋里的糖纸。",
     wood: "结构清楚，尾调安静，适合慢慢靠近。",
     spice: "第一秒就有亮点，辛香让整瓶作品更有脾气。"
   };
-  return { score, name, description: descriptionMap[topTrait] };
+  return { score: Math.round(score), name, description: descriptionMap[topTrait] };
 }
 
 function analyzeReplicability(
@@ -487,7 +559,7 @@ function recommendNotes(quizTraits: Record<Trait, number>, unlockedIds: string[]
 }
 
 export default function App() {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedNotes, setSelectedNotes] = useState<SelectedNote[]>([]);
   const [history, setHistory] = useState<Creation[]>(loadHistory);
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [customName, setCustomName] = useState<string>("");
@@ -554,22 +626,20 @@ export default function App() {
     [showAllNotes, unlockedNotes, lockedNotes]
   );
 
-  const selectedNotes = selectedIds
-    .map((id) => notes.find((note) => note.id === id)!)
-    .filter(Boolean);
+  const selectedNoteObjects = selectedNotes
+    .map((item) => {
+      const note = notes.find((n) => n.id === item.noteId);
+      return note ? { note, drops: item.drops } : null;
+    })
+    .filter((x): x is { note: Note; drops: number } => x !== null);
+
   const traits = useMemo(
-    () =>
-      selectedNotes.reduce(
-        (total, note) => {
-          (Object.keys(total) as Trait[]).forEach((trait) => {
-            total[trait] += note.traits[trait];
-          });
-          return total;
-        },
-        { fresh: 0, sweet: 0, wood: 0, spice: 0 }
-      ),
+    () => computeTraitsFromSelected(selectedNotes),
     [selectedNotes]
   );
+
+  const totalDrops = useMemo(() => getTotalDrops(selectedNotes), [selectedNotes]);
+  const isValidForBottling = totalDrops >= MIN_TOTAL_DROPS && totalDrops <= MAX_TOTAL_DROPS;
 
   const current = selectedNotes.length > 0 ? describe(traits, selectedNotes) : null;
   const displayName = customName || (current ? current.name : "");
@@ -595,15 +665,52 @@ export default function App() {
   }
 
   function addNoteFromDrawer() {
-    if (!activeNote || selectedIds.length >= 5) return;
+    if (!activeNote || selectedNotes.length >= MAX_NOTES) return;
     if (!unlockedNoteIds.includes(activeNote.id)) return;
-    setSelectedIds((items) => [...items, activeNote.id]);
+    if (selectedNotes.some((s) => s.noteId === activeNote.id)) return;
+    setSelectedNotes((items) => [...items, { noteId: activeNote.id, drops: DEFAULT_DROPS }]);
     closeNoteDetail();
+  }
+
+  function removeNoteAtIndex(index: number) {
+    setSelectedNotes((items) => items.filter((_, i) => i !== index));
+  }
+
+  function updateNoteDrops(index: number, newDrops: number) {
+    const clampedDrops = Math.max(MIN_DROPS_PER_NOTE, Math.min(MAX_DROPS_PER_NOTE, Math.round(newDrops)));
+    setSelectedNotes((items) =>
+      items.map((item, i) => (i === index ? { ...item, drops: clampedDrops } : item))
+    );
+  }
+
+  function increaseNoteDrops(index: number) {
+    setSelectedNotes((items) => {
+      const current = items[index];
+      if (!current) return items;
+      const currentTotal = getTotalDrops(items);
+      if (current.drops >= MAX_DROPS_PER_NOTE) return items;
+      if (currentTotal >= MAX_TOTAL_DROPS) return items;
+      return items.map((item, i) => (i === index ? { ...item, drops: item.drops + 1 } : item));
+    });
+  }
+
+  function decreaseNoteDrops(index: number) {
+    setSelectedNotes((items) => {
+      const current = items[index];
+      if (!current) return items;
+      if (current.drops <= MIN_DROPS_PER_NOTE) return items;
+      return items.map((item, i) => (i === index ? { ...item, drops: item.drops - 1 } : item));
+    });
   }
 
   function bottleCreation() {
     if (!current || selectedNotes.length === 0) return;
+    if (!isValidForBottling) return;
     const finalName = customName.trim() || current.name;
+    const noteDropsMap: Record<string, number> = {};
+    selectedNoteObjects.forEach(({ note, drops }) => {
+      noteDropsMap[note.name] = drops;
+    });
     const creation: Creation = {
       id: crypto.randomUUID(),
       name: finalName,
@@ -611,7 +718,8 @@ export default function App() {
       score: current.score,
       description: current.description,
       traits,
-      notes: selectedNotes.map((note) => note.name),
+      notes: selectedNoteObjects.map(({ note }) => note.name),
+      noteDrops: noteDropsMap,
       createdAt: new Date().toISOString(),
       sourceCreationId: replicateSource?.id,
       sourceCreationName: replicateSource?.name,
@@ -634,7 +742,7 @@ export default function App() {
       setUnlockNotificationOpen(true);
     }
 
-    setSelectedIds([]);
+    setSelectedNotes([]);
     setCustomName("");
     setPendingCustomName("");
     setIsEditingName(false);
@@ -648,34 +756,42 @@ export default function App() {
       return;
     }
 
-    const restoredNoteIds = analysis.allUnlocked.slice(0, 5);
-    const restoredNoteNames = restoredNoteIds
-      .map((id) => getNoteById(id)?.name)
+    const creationDrops = getCreationNoteDrops(creation);
+    const restoredItems: SelectedNote[] = [];
+    const restoredDropsMap: Record<string, number> = {};
+    for (const noteId of analysis.allUnlocked) {
+      const note = getNoteById(noteId);
+      if (note && restoredItems.length < MAX_NOTES) {
+        const drops = Math.max(MIN_DROPS_PER_NOTE, Math.min(MAX_DROPS_PER_NOTE, creationDrops[note.name] || creationDrops[noteId] || DEFAULT_DROPS));
+        restoredItems.push({ noteId, drops });
+        restoredDropsMap[note.name] = drops;
+      }
+    }
+    const restoredNoteIds = restoredItems.map((r) => r.noteId);
+    const restoredNoteNames = restoredItems
+      .map((r) => getNoteById(r.noteId)?.name)
       .filter((n): n is string => !!n);
 
-    const restoredTraits = restoredNoteIds.reduce(
-      (total, noteId) => {
-        const note = getNoteById(noteId);
-        if (note) {
-          (Object.keys(total) as Trait[]).forEach((trait) => {
-            total[trait] += note.traits[trait];
-          });
-        }
-        return total;
-      },
-      { fresh: 0, sweet: 0, wood: 0, spice: 0 }
-    );
+    const restoredTraits = computeTraitsFromSelected(restoredItems);
 
     const result: ReplicateResult = {
       restoredNoteIds,
       restoredNoteNames,
+      restoredNoteDrops: restoredDropsMap,
       missingUnlockedNotes: analysis.missingUnlockedNotes,
       missingUnknownNotes: analysis.missingUnknownNotes,
       originalNoteCount: creation.notes.length,
       restoredTraits
     };
 
-    setSelectedIds(restoredNoteIds);
+    let remainingTotal = MAX_TOTAL_DROPS;
+    const clampedItems = restoredItems.map((item) => {
+      const safeDrops = Math.min(item.drops, remainingTotal);
+      remainingTotal -= safeDrops;
+      return { ...item, drops: Math.max(MIN_DROPS_PER_NOTE, safeDrops) };
+    });
+
+    setSelectedNotes(clampedItems);
     const replicateName = `${creation.name}（复刻）`;
     setCustomName(replicateName);
     setPendingCustomName(replicateName);
@@ -713,12 +829,13 @@ export default function App() {
 
   function applyRecommendation() {
     const recommended = recommendNotes(quizTraits, unlockedNoteIds);
-    const newIds = recommended
-      .map((n) => n.id)
-      .filter((id) => !selectedIds.includes(id))
-      .slice(0, 5 - selectedIds.length);
-    if (newIds.length > 0) {
-      setSelectedIds((ids) => [...ids, ...newIds]);
+    const existingIds = new Set(selectedNotes.map((s) => s.noteId));
+    const newItems: SelectedNote[] = recommended
+      .filter((n) => !existingIds.has(n.id))
+      .slice(0, MAX_NOTES - selectedNotes.length)
+      .map((n) => ({ noteId: n.id, drops: DEFAULT_DROPS }));
+    if (newItems.length > 0) {
+      setSelectedNotes((items) => [...items, ...newItems]);
     }
     setQuizOpen(false);
     resetQuiz();
@@ -736,6 +853,8 @@ export default function App() {
       score: creation.score,
       description: creation.description,
       notes: creation.notes,
+      noteDrops: getCreationNoteDrops(creation),
+      traits: creation.traits,
       createdAt: creation.createdAt
     }));
     const jsonData = JSON.stringify(exportData, null, 2);
@@ -797,7 +916,7 @@ export default function App() {
         <button
           className="ghost-button"
           onClick={() => {
-            setSelectedIds([]);
+            setSelectedNotes([]);
             setCustomName("");
             setPendingCustomName("");
             setIsEditingName(false);
@@ -909,27 +1028,83 @@ export default function App() {
 
         <div className="panel lab-panel">
           <h2>调香台</h2>
+          <div className="lab-mode-header">
+            <span className={`lab-mode-badge ${totalDrops > 0 ? "active" : ""}`}>
+              配方实验室模式
+            </span>
+            <div className={`total-drops-display ${!isValidForBottling && totalDrops > 0 ? "invalid" : ""}`}>
+              总滴数：<b>{totalDrops}</b>
+              <span className="drops-range"> / {MIN_TOTAL_DROPS}-{MAX_TOTAL_DROPS}</span>
+            </div>
+          </div>
+          {totalDrops > 0 && !isValidForBottling && (
+            <div className="drops-warning">
+              ⚠ 总滴数需在 {MIN_TOTAL_DROPS}-{MAX_TOTAL_DROPS} 之间才能封瓶
+            </div>
+          )}
           <div className="bottle">
-            {selectedNotes.length === 0 ? (
+            {selectedNoteObjects.length === 0 ? (
               <span>选择香调开始</span>
             ) : (
-              selectedNotes.map((note, index) => (
-                <i key={`${note.id}-${index}`} style={{ background: note.color, height: `${34 + index * 10}px` }} />
-              ))
+              (() => {
+                const maxDrops = Math.max(...selectedNoteObjects.map((s) => s.drops), 1);
+                const bottleMaxHeight = 160;
+                return selectedNoteObjects.map(({ note, drops }, index) => {
+                  const height = Math.max(24, Math.round((drops / maxDrops) * bottleMaxHeight * 0.7 + 24));
+                  return (
+                    <i
+                      key={`${note.id}-${index}`}
+                      style={{ background: note.color, height: `${height}px` }}
+                      title={`${note.name} · ${drops}滴`}
+                    />
+                  );
+                });
+              })()
             )}
           </div>
           <div className="selected-list">
-            {selectedNotes.map((note, index) => (
-              <button key={`${note.id}-${index}`} onClick={() => setSelectedIds((ids) => ids.filter((_, i) => i !== index))}>
-                {note.name}
-              </button>
-            ))}
+            {selectedNoteObjects.map(({ note, drops }, index) => {
+              const canIncrease = drops < MAX_DROPS_PER_NOTE && totalDrops < MAX_TOTAL_DROPS;
+              const canDecrease = drops > MIN_DROPS_PER_NOTE;
+              return (
+                <div key={`${note.id}-${index}`} className="selected-item-row">
+                  <button
+                    className="selected-item-name"
+                    onClick={() => removeNoteAtIndex(index)}
+                    title="点击移除"
+                  >
+                    <span className="swatch small-swatch" style={{ background: note.color }} />
+                    {note.name}
+                  </button>
+                  <div className="drops-controller">
+                    <button
+                      className="drops-btn minus"
+                      onClick={() => decreaseNoteDrops(index)}
+                      disabled={!canDecrease}
+                    >
+                      −
+                    </button>
+                    <span className="drops-count">
+                      <b>{drops}</b>
+                      <small>滴</small>
+                    </span>
+                    <button
+                      className="drops-btn plus"
+                      onClick={() => increaseNoteDrops(index)}
+                      disabled={!canIncrease}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <div className="traits">
             {(Object.keys(traits) as Trait[]).map((trait) => (
               <label key={trait}>
                 <span>{traitLabels[trait]}</span>
-                <meter min={0} max={12} value={traits[trait]} />
+                <meter min={0} max={20} value={traits[trait]} />
                 <b>{traits[trait]}</b>
               </label>
             ))}
@@ -1012,14 +1187,18 @@ export default function App() {
                   </div>
                 )}
                 <p>{current.description}</p>
-                <button className="primary-button" disabled={!current} onClick={bottleCreation}>
+                <button
+                  className="primary-button"
+                  disabled={!current || !isValidForBottling}
+                  onClick={bottleCreation}
+                >
                   封瓶记录
                 </button>
               </>
             ) : (
               <>
                 <strong>未命名试香</strong>
-                <p>至少加入一种香调，系统会根据气味性格生成名字和评分。</p>
+                <p>至少加入一种香调并设置 {MIN_TOTAL_DROPS}-{MAX_TOTAL_DROPS} 总滴数，系统会根据气味性格生成名字和评分。</p>
               </>
             )}
           </div>
@@ -1276,12 +1455,14 @@ export default function App() {
               </div>
               <button
                 className="primary-button drawer-action"
-                disabled={selectedIds.length >= 5 || !unlockedNoteIds.includes(activeNote.id)}
+                disabled={selectedNotes.length >= MAX_NOTES || !unlockedNoteIds.includes(activeNote.id) || selectedNotes.some((s) => s.noteId === activeNote.id)}
                 onClick={addNoteFromDrawer}
               >
                 {!unlockedNoteIds.includes(activeNote.id)
                   ? "香调未解锁"
-                  : selectedIds.length >= 5
+                  : selectedNotes.some((s) => s.noteId === activeNote.id)
+                  ? "已在调香台"
+                  : selectedNotes.length >= MAX_NOTES
                   ? "调香台已满"
                   : "加入调香台"}
               </button>
@@ -1314,25 +1495,43 @@ export default function App() {
               <div className="creation-section">
                 <h3>香调列表</h3>
                 <div className="creation-notes">
-                  {(activeCreation.notes || []).map((noteName, index) => {
-                    const note = getNoteByName(noteName);
-                    const isLocked = note ? !unlockedNoteIds.includes(note.id) : true;
-                    const isUnknown = !note;
-                    return (
-                      <span
-                        key={index}
-                        className={`creation-note-tag ${isLocked ? "note-locked" : ""} ${isUnknown ? "note-unknown" : ""}`}
-                      >
-                        {isLocked && !isUnknown && <span className="note-lock-icon">🔒</span>}
-                        {isUnknown && <span className="note-lock-icon">?</span>}
-                        {noteName}
-                      </span>
-                    );
-                  })}
+                  {(() => {
+                    const dropsMap = getCreationNoteDrops(activeCreation);
+                    return (activeCreation.notes || []).map((noteName, index) => {
+                      const note = getNoteByName(noteName);
+                      const isLocked = note ? !unlockedNoteIds.includes(note.id) : true;
+                      const isUnknown = !note;
+                      const drops = dropsMap[noteName] || dropsMap[note?.id || ""] || DEFAULT_DROPS;
+                      return (
+                        <span
+                          key={index}
+                          className={`creation-note-tag ${isLocked ? "note-locked" : ""} ${isUnknown ? "note-unknown" : ""}`}
+                        >
+                          {isLocked && !isUnknown && <span className="note-lock-icon">🔒</span>}
+                          {isUnknown && <span className="note-lock-icon">?</span>}
+                          {noteName}
+                          <span className="note-drops-badge">×{drops}</span>
+                        </span>
+                      );
+                    });
+                  })()}
                   {(!activeCreation.notes || activeCreation.notes.length === 0) && (
                     <span className="creation-note-tag" style={{ opacity: 0.6 }}>无香调记录</span>
                   )}
                 </div>
+                {(() => {
+                  const total = Object.values(getCreationNoteDrops(activeCreation)).reduce((s, n) => s + n, 0);
+                  if (activeCreation.notes && activeCreation.notes.length > 0 && total > 0) {
+                    return (
+                      <div className="creation-drops-summary">
+                        <span>配方总滴数：</span>
+                        <b>{total}</b>
+                        <span className="drops-summary-note">滴</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 {(() => {
                   const analysis = analyzeReplicability(activeCreation, unlockedNoteIds);
                   if (analysis.isPartial || analysis.missingUnknownNotes.length > 0) {
@@ -1496,9 +1695,11 @@ export default function App() {
                   </span>
                 </div>
                 <div className="replicate-detail-item">
-                  <span className="replicate-detail-label">已恢复香调</span>
-                  <span className="replicate-detail-value replicate-notes-restored">
-                    {replicateResult.restoredNoteNames.join("、")}
+                  <span className="replicate-detail-label">配方滴数</span>
+                  <span className="replicate-detail-value">
+                    {Object.entries(replicateResult.restoredNoteDrops)
+                      .map(([name, d]) => `${name}×${d}`)
+                      .join("、")}
                   </span>
                 </div>
                 <div className="replicate-detail-item">
@@ -1702,15 +1903,30 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
       <div className="compare-card-section">
         <h4>香调组成</h4>
         <div className="compare-card-notes">
-          {(creation.notes || []).map((noteName, index) => (
-            <span key={index} className="compare-note-tag">
-              {noteName}
-            </span>
-          ))}
+          {(() => {
+            const dropsMap = getCreationNoteDropsStandalone(creation);
+            return (creation.notes || []).map((noteName, index) => (
+              <span key={index} className="compare-note-tag">
+                {noteName}
+                <span className="compare-note-drops">×{dropsMap[noteName] || DEFAULT_DROPS}</span>
+              </span>
+            ));
+          })()}
           {(!creation.notes || creation.notes.length === 0) && (
             <span className="compare-note-tag" style={{ opacity: 0.6 }}>无香调记录</span>
           )}
         </div>
+        {(() => {
+          const total = Object.values(getCreationNoteDropsStandalone(creation)).reduce((s, n) => s + n, 0);
+          if (creation.notes && creation.notes.length > 0 && total > 0) {
+            return (
+              <div className="compare-drops-summary">
+                总滴数：<b>{total}</b>
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       <div className="compare-card-section">
@@ -1755,6 +1971,17 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
 
 function hasTraitsStandalone(creation: Creation): creation is Creation & { traits: Record<Trait, number> } {
   return !!(creation.traits && typeof creation.traits === "object" && Object.keys(creation.traits).length > 0);
+}
+
+function getCreationNoteDropsStandalone(creation: Creation): Record<string, number> {
+  if (creation.noteDrops && Object.keys(creation.noteDrops).length > 0) {
+    return creation.noteDrops;
+  }
+  const drops: Record<string, number> = {};
+  creation.notes.forEach((name) => {
+    drops[name] = DEFAULT_DROPS;
+  });
+  return drops;
 }
 
 const traitLabelsStandalone: Record<Trait, string> = {

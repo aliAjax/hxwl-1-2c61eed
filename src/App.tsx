@@ -39,6 +39,11 @@ type Creation = {
   isReplicate?: boolean;
   fragranceStructure?: FragranceStructure;
   phaseDescriptions?: Record<FragrancePhase, string>;
+  recipeId?: string;
+  version?: number;
+  parentVersionId?: string;
+  versionNote?: string;
+  updatedAt?: string;
 };
 
 type ReplicateResult = {
@@ -461,6 +466,22 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
   }
   const hasAnyTrait = safeTraits && (safeTraits.fresh + safeTraits.sweet + safeTraits.wood + safeTraits.spice) > 0;
 
+  const safeVersion = typeof data.version === "number" && isFinite(data.version) && data.version >= 1
+    ? Math.round(data.version)
+    : 1;
+  const safeRecipeId = typeof data.recipeId === "string" && data.recipeId
+    ? data.recipeId
+    : data.id;
+  const safeParentVersionId = typeof data.parentVersionId === "string" && data.parentVersionId
+    ? data.parentVersionId
+    : undefined;
+  const safeVersionNote = typeof data.versionNote === "string"
+    ? data.versionNote
+    : undefined;
+  const safeUpdatedAt = typeof data.updatedAt === "string" && data.updatedAt
+    ? data.updatedAt
+    : undefined;
+
   return {
     id: data.id,
     name: typeof data.name === "string" && data.name ? data.name : "未命名作品",
@@ -475,7 +496,12 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
     sourceCreationName: typeof data.sourceCreationName === "string" && data.sourceCreationName ? data.sourceCreationName : undefined,
     isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false,
     fragranceStructure: data.fragranceStructure && typeof data.fragranceStructure === "object" ? data.fragranceStructure : undefined,
-    phaseDescriptions: data.phaseDescriptions && typeof data.phaseDescriptions === "object" ? data.phaseDescriptions : undefined
+    phaseDescriptions: data.phaseDescriptions && typeof data.phaseDescriptions === "object" ? data.phaseDescriptions : undefined,
+    recipeId: safeRecipeId,
+    version: safeVersion,
+    parentVersionId: safeParentVersionId,
+    versionNote: safeVersionNote,
+    updatedAt: safeUpdatedAt
   };
 }
 
@@ -1939,7 +1965,36 @@ export default function App() {
     return null;
   });
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+  const [versionNote, setVersionNote] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function repairLegacyCreationVersions(): Promise<number> {
+    const all = await loadAllFromDB();
+    let repairedCount = 0;
+    const updates: Creation[] = [];
+
+    for (const creation of all) {
+      const needsRepair = 
+        !creation.recipeId ||
+        !creation.version ||
+        (creation.recipeId && creation.recipeId !== creation.id && !creation.version);
+
+      if (needsRepair) {
+        const repaired = normalizeCreation({ ...creation, id: creation.id });
+        if (!repaired.version) {
+          repaired.version = 1;
+        }
+        updates.push(repaired);
+        repairedCount++;
+      }
+    }
+
+    if (updates.length > 0) {
+      await libraryDB.addAll(updates);
+    }
+
+    return repairedCount;
+  }
 
   const reloadHistory = useCallback(async () => {
     const all = await loadAllFromDB();
@@ -1958,10 +2013,22 @@ export default function App() {
       if (result.migrationReport && result.migrationReport.count > 0) {
         setMigrationReport(result.migrationReport);
       }
+      
+      const repairedCount = await repairLegacyCreationVersions();
+      
       const all = await loadAllFromDB();
       if (mounted) {
         setHistory(all);
         setDbReady(true);
+        
+        if (repairedCount > 0 && !result.migrationReport) {
+          setMigrationReport({
+            count: repairedCount,
+            recovered: 0,
+            deduped: 0,
+            corrupted: 0
+          });
+        }
       }
     }).catch(async () => {
       if (mounted) {
@@ -2298,12 +2365,18 @@ export default function App() {
     });
   }
 
-  function buildCurrentCreation(): { creation: Creation; newlyUnlockedNotes: Note[] } {
+  function buildCurrentCreation(options?: {
+    recipeId?: string;
+    version?: number;
+    parentVersionId?: string;
+    versionNote?: string;
+  }): { creation: Creation; newlyUnlockedNotes: Note[] } {
     const finalName = customName.trim() || current!.name;
     const noteDropsMap: Record<string, number> = {};
     selectedNoteObjects.forEach(({ note, drops }) => {
       noteDropsMap[note.name] = drops;
     });
+    const now = new Date().toISOString();
     const creation: Creation = {
       id: crypto.randomUUID(),
       name: finalName,
@@ -2313,12 +2386,17 @@ export default function App() {
       traits,
       notes: selectedNoteObjects.map(({ note }) => note.name),
       noteDrops: noteDropsMap,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
       sourceCreationId: replicateSource?.id,
       sourceCreationName: replicateSource?.name,
       isReplicate: !!replicateSource,
       fragranceStructure: current!.fragranceStructure,
-      phaseDescriptions: current!.phaseDescriptions
+      phaseDescriptions: current!.phaseDescriptions,
+      recipeId: options?.recipeId,
+      version: options?.version,
+      parentVersionId: options?.parentVersionId,
+      versionNote: options?.versionNote,
+      updatedAt: now
     };
     const newlyUnlockedNotes = getNewlyUnlockedNotes(
       traits,
@@ -2346,24 +2424,78 @@ export default function App() {
     setEditingSource(null);
   }
 
+  function getNextVersionNumber(recipeId: string): number {
+    const versions = history.filter((c) => c.recipeId === recipeId);
+    if (versions.length === 0) return 1;
+    const maxVersion = versions.reduce(
+      (max, c) => (c.version && c.version > max ? c.version : max),
+      0
+    );
+    return maxVersion + 1;
+  }
+
   async function saveAsNewCreation() {
     if (!current || selectedNotes.length === 0) return;
     if (!isValidForBottling) return;
-    const { creation, newlyUnlockedNotes } = buildCurrentCreation();
+
+    const safeVersionNote = versionNote.trim() || undefined;
+    const recipeId = editingSource?.recipeId || crypto.randomUUID();
+    const baseVersion = editingSource?.version || 0;
+    const nextVersion = baseVersion + 1;
+
+    const { creation, newlyUnlockedNotes } = buildCurrentCreation({
+      recipeId,
+      version: nextVersion,
+      parentVersionId: editingSource?.id,
+      versionNote: safeVersionNote
+    });
+
     if (editingSource?.isReplicate || editingSource?.sourceCreationId || editingSource?.sourceCreationName) {
       creation.sourceCreationId = editingSource.sourceCreationId ?? editingSource.id;
       creation.sourceCreationName = editingSource.sourceCreationName ?? editingSource.name;
       creation.isReplicate = true;
     }
+
     await libraryDB.add(creation);
     setHistory([creation, ...history]);
     finalizeAfterSave(newlyUnlockedNotes);
     setSaveDialogOpen(false);
+    setVersionNote("");
+  }
+
+  async function saveAsNewVersion() {
+    if (!current || selectedNotes.length === 0 || !editingSource) return;
+    if (!isValidForBottling) return;
+
+    const safeVersionNote = versionNote.trim() || undefined;
+    const recipeId = editingSource.recipeId || editingSource.id;
+    const nextVersion = getNextVersionNumber(recipeId);
+
+    const { creation: newCreation, newlyUnlockedNotes } = buildCurrentCreation({
+      recipeId,
+      version: nextVersion,
+      parentVersionId: editingSource.id,
+      versionNote: safeVersionNote
+    });
+
+    const original = history.find((c) => c.id === editingSource.id);
+    newCreation.sourceCreationId = original?.sourceCreationId ?? editingSource.sourceCreationId;
+    newCreation.sourceCreationName = original?.sourceCreationName ?? editingSource.sourceCreationName;
+    newCreation.isReplicate = !!(original?.isReplicate ?? editingSource.isReplicate);
+
+    await libraryDB.add(newCreation);
+    const next = [newCreation, ...history];
+    setHistory(next);
+    finalizeAfterSave(newlyUnlockedNotes);
+    setSaveDialogOpen(false);
+    setVersionNote("");
   }
 
   async function overwriteOriginalCreation() {
     if (!current || selectedNotes.length === 0 || !editingSource) return;
     if (!isValidForBottling) return;
+
+    const safeVersionNote = versionNote.trim() || undefined;
     const { creation: newCreation, newlyUnlockedNotes } = buildCurrentCreation();
 
     const original = history.find((c) => c.id === editingSource.id);
@@ -2373,7 +2505,12 @@ export default function App() {
       createdAt: original?.createdAt || editingSource.createdAt,
       sourceCreationId: original?.sourceCreationId ?? editingSource.sourceCreationId,
       sourceCreationName: original?.sourceCreationName ?? editingSource.sourceCreationName,
-      isReplicate: !!(original?.isReplicate ?? editingSource.isReplicate)
+      isReplicate: !!(original?.isReplicate ?? editingSource.isReplicate),
+      recipeId: original?.recipeId ?? editingSource.recipeId ?? editingSource.id,
+      version: original?.version ?? editingSource.version ?? 1,
+      parentVersionId: original?.parentVersionId ?? editingSource.parentVersionId,
+      versionNote: safeVersionNote || (original?.versionNote ?? editingSource.versionNote),
+      updatedAt: new Date().toISOString()
     };
 
     await libraryDB.update(updatedCreation);
@@ -2381,6 +2518,7 @@ export default function App() {
     setHistory(next);
     finalizeAfterSave(newlyUnlockedNotes);
     setSaveDialogOpen(false);
+    setVersionNote("");
   }
 
   function bottleCreation() {
@@ -2625,7 +2763,12 @@ export default function App() {
       sourceCreationName: creation.sourceCreationName,
       isReplicate: creation.isReplicate,
       fragranceStructure: creation.fragranceStructure,
-      phaseDescriptions: creation.phaseDescriptions
+      phaseDescriptions: creation.phaseDescriptions,
+      recipeId: creation.recipeId,
+      version: creation.version,
+      parentVersionId: creation.parentVersionId,
+      versionNote: creation.versionNote,
+      updatedAt: creation.updatedAt
     }));
     const jsonData = JSON.stringify(exportData, null, 2);
     const blob = new Blob([jsonData], { type: "application/json" });
@@ -3553,13 +3696,23 @@ export default function App() {
           {migrationReport && (
             <div className="migration-banner">
               <div className="migration-banner-content">
-                <span className="migration-banner-icon">📦</span>
+                <span className="migration-banner-icon">
+                  {migrationReport.deduped === 0 && migrationReport.corrupted === 0 && migrationReport.recovered === 0 ? "📜" : "📦"}
+                </span>
                 <div className="migration-banner-text">
-                  <strong>数据迁移完成</strong>
-                  <span>已从旧版本迁移 {migrationReport.count} 个作品
-                    {migrationReport.deduped > 0 && `，修复 ${migrationReport.deduped} 个重复ID`}
-                    {migrationReport.corrupted > 0 && `，跳过 ${migrationReport.corrupted} 条损坏记录`}
-                    {migrationReport.recovered > 0 && `，恢复 ${migrationReport.recovered} 条记录`}
+                  <strong>
+                    {migrationReport.deduped === 0 && migrationReport.corrupted === 0 && migrationReport.recovered === 0
+                      ? "版本字段已更新"
+                      : "数据迁移完成"}
+                  </strong>
+                  <span>
+                    {migrationReport.deduped === 0 && migrationReport.corrupted === 0 && migrationReport.recovered === 0
+                      ? `已为 ${migrationReport.count} 个旧作品补充版本信息，支持配方版本功能`
+                      : `已从旧版本迁移 ${migrationReport.count} 个作品` +
+                        (migrationReport.deduped > 0 ? `，修复 ${migrationReport.deduped} 个重复ID` : "") +
+                        (migrationReport.corrupted > 0 ? `，跳过 ${migrationReport.corrupted} 条损坏记录` : "") +
+                        (migrationReport.recovered > 0 ? `，恢复 ${migrationReport.recovered} 条记录` : "")
+                    }
                   </span>
                 </div>
                 <button className="migration-banner-close" onClick={() => setMigrationReport(null)}>×</button>
@@ -3766,8 +3919,17 @@ export default function App() {
                     <h3>
                       {creation.name}
                       {creation.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
+                      {creation.version && <small className="version-tag-small">v{creation.version}</small>}
                     </h3>
                     <p>{(creation.notes || []).join(" / ") || "无香调记录"}</p>
+                    {(() => {
+                      const recipeId = creation.recipeId || creation.id;
+                      const totalVersions = history.filter((c) => (c.recipeId || c.id) === recipeId).length;
+                      if (totalVersions > 1) {
+                        return <small className="version-count-tag">📜 {totalVersions}个版本</small>;
+                      }
+                      return null;
+                    })()}
                   </button>
                 ))}
               </div>
@@ -3868,6 +4030,9 @@ export default function App() {
               <h2 className="drawer-title">
                 {activeCreation.name}
                 {activeCreation.isReplicate && <span className="replicate-badge">✦ 复刻</span>}
+                {activeCreation.version && (
+                  <span className="version-chip version-chip-large">v{activeCreation.version}</span>
+                )}
               </h2>
               {activeCreation.originalName && activeCreation.name !== activeCreation.originalName && (
                 <p className="creation-original-name">原名：{activeCreation.originalName}</p>
@@ -3875,6 +4040,145 @@ export default function App() {
               {activeCreation.sourceCreationName && (
                 <p className="replicate-source-info">复刻来源：{activeCreation.sourceCreationName}</p>
               )}
+
+              {(() => {
+                const recipeId = activeCreation.recipeId || activeCreation.id;
+                const allVersions = history.filter((c) => c.recipeId === recipeId);
+                const parentVersion = activeCreation.parentVersionId
+                  ? history.find((c) => c.id === activeCreation.parentVersionId)
+                  : null;
+
+                return (
+                  <>
+                    {(allVersions.length > 1 || activeCreation.version || parentVersion) && (
+                      <div className="creation-version-section">
+                        <h3 className="creation-version-title">📜 版本信息</h3>
+
+                        <div className="creation-version-meta">
+                          {activeCreation.version && (
+                            <div className="version-meta-item">
+                              <span className="meta-label">当前版本</span>
+                              <span className="meta-value">
+                                <span className="version-chip">v{activeCreation.version}</span>
+                                {activeCreation.updatedAt && (
+                                  <span className="version-update-time">
+                                    更新于 {new Date(activeCreation.updatedAt).toLocaleDateString('zh-CN')}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          )}
+                          {parentVersion && (
+                            <div className="version-meta-item">
+                              <span className="meta-label">从哪个版本改来</span>
+                              <button
+                                className="version-parent-btn"
+                                onClick={() => openCreationDetail(parentVersion)}
+                              >
+                                <span className="version-chip">
+                                  v{parentVersion.version || 1}
+                                </span>
+                                <span className="version-parent-name">{parentVersion.name}</span>
+                                <span className="version-arrow">→</span>
+                                <span>本版本</span>
+                              </button>
+                            </div>
+                          )}
+                          {activeCreation.versionNote && (
+                            <div className="version-meta-item version-note-box">
+                              <span className="meta-label">📝 版本备注</span>
+                              <p className="version-note-text">{activeCreation.versionNote}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {allVersions.length > 1 && (
+                          <div className="version-history-section">
+                            <div className="version-history-header">
+                              <h4>🔄 该配方的所有版本（{allVersions.length}个）</h4>
+                              {allVersions.length >= 2 && (
+                                <button
+                                  className="compare-versions-btn"
+                                  onClick={() => {
+                                    const sorted = [...allVersions].sort(
+                                      (a, b) => (a.version || 1) - (b.version || 1)
+                                    );
+                                    const latest = sorted[sorted.length - 1];
+                                    const previous = sorted[sorted.length - 2];
+                                    setCompareId1(previous.id);
+                                    setCompareId2(latest.id);
+                                    setCompareOpen(true);
+                                    closeCreationDetail();
+                                  }}
+                                >
+                                  ⚖️ 对比最近两个版本
+                                </button>
+                              )}
+                            </div>
+                            <div className="version-history-list">
+                              {[...allVersions]
+                                .sort((a, b) => (b.version || 1) - (a.version || 1))
+                                .map((v) => {
+                                  const isCurrent = v.id === activeCreation.id;
+                                  return (
+                                    <div
+                                      key={v.id}
+                                      className={`version-history-item ${isCurrent ? "current-version" : ""}`}
+                                    >
+                                      <button
+                                        className="version-history-btn"
+                                        onClick={() => {
+                                          if (!isCurrent) openCreationDetail(v);
+                                        }}
+                                        disabled={isCurrent}
+                                      >
+                                        <span className="version-chip">v{v.version || 1}</span>
+                                        <span className="version-history-name">{v.name}</span>
+                                        <span className="version-history-score">{v.score}分</span>
+                                        <span className="version-history-date">
+                                          {new Date(v.createdAt).toLocaleDateString('zh-CN')}
+                                        </span>
+                                        {isCurrent && (
+                                          <span className="version-current-badge">当前</span>
+                                        )}
+                                      </button>
+                                      <div className="version-history-actions">
+                                        {!isCurrent && (
+                                          <>
+                                            <button
+                                              className="mini-action-btn"
+                                              onClick={() => {
+                                                setCompareId1(v.id);
+                                                setCompareId2(activeCreation.id);
+                                                setCompareOpen(true);
+                                                closeCreationDetail();
+                                              }}
+                                              title={`与当前版本对比`}
+                                            >
+                                              ⚖️ 对比
+                                            </button>
+                                            <button
+                                              className="mini-action-btn adjust-btn"
+                                              onClick={() => continueAdjusting(v)}
+                                              title="基于此版本继续调整"
+                                            >
+                                              ✎ 调整
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
               <p className="drawer-profile">{activeCreation.description}</p>
 
               <div className="creation-section">
@@ -4278,6 +4582,12 @@ export default function App() {
               <h2 className="save-title">保存作品</h2>
               <p className="save-subtitle">
                 正在调整的作品：<b>{editingSource.name}</b>
+                {editingSource.version && (
+                  <>
+                    {" "}
+                    <span className="version-chip">v{editingSource.version}</span>
+                  </>
+                )}
                 {editingSource.sourceCreationName && (
                   <>
                     {" "}（来源：{editingSource.sourceCreationName}）
@@ -4287,25 +4597,105 @@ export default function App() {
               <p className="save-description">
                 调整后新作品名为：<b>{displayName}</b>
               </p>
+
+              {(() => {
+                const recipeId = editingSource.recipeId || editingSource.id;
+                const existingVersions = history.filter((c) => c.recipeId === recipeId);
+                if (existingVersions.length > 0) {
+                  const sortedVersions = [...existingVersions].sort(
+                    (a, b) => (b.version || 1) - (a.version || 1)
+                  );
+                  const nextVer = getNextVersionNumber(recipeId);
+                  return (
+                    <div className="version-info-box">
+                      <h3 className="version-info-title">
+                        📜 该配方已有 {sortedVersions.length} 个版本
+                        <span className="next-version-hint">（保存为新版本将是 v{nextVer}）</span>
+                      </h3>
+                      <div className="version-list-compact">
+                        {sortedVersions.slice(0, 5).map((v) => (
+                          <div
+                            key={v.id}
+                            className={`version-item-compact ${v.id === editingSource.id ? "current" : ""}`}
+                          >
+                            <span className="version-chip">v{v.version || 1}</span>
+                            <span className="version-item-name">{v.name}</span>
+                            <span className="version-item-score">{v.score}分</span>
+                            {v.id === editingSource.id && (
+                              <span className="version-current-tag">当前编辑</span>
+                            )}
+                          </div>
+                        ))}
+                        {sortedVersions.length > 5 && (
+                          <div className="version-more-hint">
+                            还有 {sortedVersions.length - 5} 个历史版本...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="version-info-box version-info-first">
+                    <h3 className="version-info-title">✨ 这是该配方的第一个版本</h3>
+                    <p className="version-info-desc">
+                      建议为后续调整使用"保存为新版本"功能，保留创作轨迹
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="version-note-section">
+                <label className="version-note-label">
+                  📝 版本备注（可选）
+                </label>
+                <textarea
+                  className="version-note-input"
+                  value={versionNote}
+                  onChange={(e) => setVersionNote(e.target.value)}
+                  placeholder="记录这次调整了什么，例如：增加了木质调、优化了甜度、尝试了新组合..."
+                  rows={2}
+                />
+              </div>
+
               <div className="save-options">
                 <button
                   className="save-option-card"
                   onClick={saveAsNewCreation}
                 >
-                  <div className="save-option-icon">✨</div>
-                  <h3>保存为新作品</h3>
-                  <p>保留原作品不变，创建一个新的作品记录</p>
+                  <div className="save-option-icon">🆕</div>
+                  <h3>保存为新配方</h3>
+                  <p>
+                    创建一个全新的配方，与原配方无版本关联。
+                    {editingSource.version &&
+                      ` 新配方将从 v1 重新开始计数。`}
+                  </p>
+                </button>
+                <button
+                  className="save-option-card save-option-new-version"
+                  onClick={saveAsNewVersion}
+                >
+                  <div className="save-option-icon">📋</div>
+                  <h3>保存为新版本</h3>
+                  <p>
+                    在原配方下增加一个新版本（推荐）。
+                    方便后续对比和回溯创作过程。
+                  </p>
+                  <div className="save-option-hint">
+                    将保存为 v{getNextVersionNumber(editingSource.recipeId || editingSource.id)}
+                  </div>
                 </button>
                 <button
                   className="save-option-card save-option-overwrite"
                   onClick={overwriteOriginalCreation}
                 >
                   <div className="save-option-icon">✎</div>
-                  <h3>覆盖原作品</h3>
+                  <h3>覆盖当前版本</h3>
                   <p>
-                    更新原作品的配方、名称和评分，
+                    更新当前版本的配方、名称和评分，
                     保留原始创建时间
                     {editingSource.sourceCreationName && "和来源信息"}
+                    。此操作不可撤销。
                   </p>
                 </button>
               </div>
@@ -4338,39 +4728,138 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  <div className="compare-selectors">
-                    <div className="compare-selector">
-                      <label className="compare-selector-label">作品 A</label>
-                      <select
-                        className="compare-select"
-                        value={compareId1 || ""}
-                        onChange={(e) => selectForCompare(1, e.target.value)}
-                      >
-                        {history.map((creation) => (
-                          <option key={creation.id} value={creation.id}>
-                            {creation.name || "未命名作品"} ({creation.score ?? 0}分)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="compare-vs">
-                      <span>VS</span>
-                    </div>
-                    <div className="compare-selector">
-                      <label className="compare-selector-label">作品 B</label>
-                      <select
-                        className="compare-select"
-                        value={compareId2 || ""}
-                        onChange={(e) => selectForCompare(2, e.target.value)}
-                      >
-                        {history.map((creation) => (
-                          <option key={creation.id} value={creation.id}>
-                            {creation.name || "未命名作品"} ({creation.score ?? 0}分)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                  {(() => {
+                    const recipeGroups = new Map<string, Creation[]>();
+                    history.forEach((c) => {
+                      const key = c.recipeId || c.id;
+                      if (!recipeGroups.has(key)) {
+                        recipeGroups.set(key, []);
+                      }
+                      recipeGroups.get(key)!.push(c);
+                    });
+
+                    const hasVersionedRecipes = Array.from(recipeGroups.values()).some(
+                      (group) => group.length > 1
+                    );
+
+                    return (
+                      <>
+                        {hasVersionedRecipes && (
+                          <div className="compare-quick-actions">
+                            <h4>🚀 快速对比同一配方的版本</h4>
+                            <div className="compare-quick-list">
+                              {Array.from(recipeGroups.entries())
+                                .filter(([_, group]) => group.length > 1)
+                                .slice(0, 5)
+                                .map(([recipeId, group]) => {
+                                  const sorted = [...group].sort(
+                                    (a, b) => (a.version || 1) - (b.version || 1)
+                                  );
+                                  const oldest = sorted[0];
+                                  const newest = sorted[sorted.length - 1];
+                                  return (
+                                    <button
+                                      key={recipeId}
+                                      className="compare-quick-btn"
+                                      onClick={() => {
+                                        setCompareId1(oldest.id);
+                                        setCompareId2(newest.id);
+                                      }}
+                                    >
+                                      <span className="quick-btn-name">{oldest.name}</span>
+                                      <span className="quick-btn-versions">
+                                        v{oldest.version || 1} → v{newest.version || 1}
+                                      </span>
+                                      <span className="quick-btn-count">（{group.length}个版本）</span>
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="compare-selectors">
+                          <div className="compare-selector">
+                            <label className="compare-selector-label">作品 A</label>
+                            <select
+                              className="compare-select"
+                              value={compareId1 || ""}
+                              onChange={(e) => selectForCompare(1, e.target.value)}
+                            >
+                              {Array.from(recipeGroups.entries()).map(
+                                ([recipeId, group]) => {
+                                  if (group.length === 1) {
+                                    const c = group[0];
+                                    return (
+                                      <option key={c.id} value={c.id}>
+                                        {c.name || "未命名作品"} ({c.score ?? 0}分)
+                                        {c.version ? ` v${c.version}` : ""}
+                                      </option>
+                                    );
+                                  }
+                                  const sorted = [...group].sort(
+                                    (a, b) => (a.version || 1) - (b.version || 1)
+                                  );
+                                  return (
+                                    <optgroup
+                                      key={recipeId}
+                                      label={`📜 ${sorted[0].name}（${group.length}个版本）`}
+                                    >
+                                      {sorted.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          v{c.version || 1} · {c.name || "未命名作品"} ({c.score ?? 0}分)
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  );
+                                }
+                              )}
+                            </select>
+                          </div>
+                          <div className="compare-vs">
+                            <span>VS</span>
+                          </div>
+                          <div className="compare-selector">
+                            <label className="compare-selector-label">作品 B</label>
+                            <select
+                              className="compare-select"
+                              value={compareId2 || ""}
+                              onChange={(e) => selectForCompare(2, e.target.value)}
+                            >
+                              {Array.from(recipeGroups.entries()).map(
+                                ([recipeId, group]) => {
+                                  if (group.length === 1) {
+                                    const c = group[0];
+                                    return (
+                                      <option key={c.id} value={c.id}>
+                                        {c.name || "未命名作品"} ({c.score ?? 0}分)
+                                        {c.version ? ` v${c.version}` : ""}
+                                      </option>
+                                    );
+                                  }
+                                  const sorted = [...group].sort(
+                                    (a, b) => (a.version || 1) - (b.version || 1)
+                                  );
+                                  return (
+                                    <optgroup
+                                      key={recipeId}
+                                      label={`📜 ${sorted[0].name}（${group.length}个版本）`}
+                                    >
+                                      {sorted.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          v{c.version || 1} · {c.name || "未命名作品"} ({c.score ?? 0}分)
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  );
+                                }
+                              )}
+                            </select>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {compareId1 === compareId2 && (
                     <div className="compare-warning">
@@ -4461,10 +4950,26 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
           <span className="compare-score-label">分</span>
         </div>
         <h3 className="compare-card-name">{creation.name}</h3>
+        {creation.version && (
+          <div className="compare-card-version">
+            <span className="version-chip">v{creation.version}</span>
+            {creation.updatedAt && (
+              <span className="compare-update-time">
+                更新 {new Date(creation.updatedAt).toLocaleDateString('zh-CN')}
+              </span>
+            )}
+          </div>
+        )}
         {creation.originalName && creation.name !== creation.originalName && (
           <p className="compare-card-original">原名：{creation.originalName}</p>
         )}
       </div>
+      {creation.versionNote && (
+        <div className="compare-card-version-note">
+          <span className="note-icon">📝</span>
+          <p>{creation.versionNote}</p>
+        </div>
+      )}
       <p className="compare-card-desc">{creation.description}</p>
 
       <div className="compare-card-section">

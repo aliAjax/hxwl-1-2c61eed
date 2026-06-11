@@ -33,6 +33,11 @@ export type Creation = {
   isReplicate?: boolean;
   fragranceStructure?: FragranceStructure;
   phaseDescriptions?: Record<FragrancePhase, string>;
+  recipeId?: string;
+  version?: number;
+  parentVersionId?: string;
+  versionNote?: string;
+  updatedAt?: string;
 };
 
 export type ImportResult = {
@@ -162,7 +167,12 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
     sourceCreationName: typeof data.sourceCreationName === "string" && data.sourceCreationName ? data.sourceCreationName : undefined,
     isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false,
     fragranceStructure: data.fragranceStructure && typeof data.fragranceStructure === "object" ? data.fragranceStructure : undefined,
-    phaseDescriptions: data.phaseDescriptions && typeof data.phaseDescriptions === "object" ? data.phaseDescriptions : undefined
+    phaseDescriptions: data.phaseDescriptions && typeof data.phaseDescriptions === "object" ? data.phaseDescriptions : undefined,
+    recipeId: typeof data.recipeId === "string" && data.recipeId ? data.recipeId : data.id,
+    version: typeof data.version === "number" && isFinite(data.version) && data.version >= 1 ? Math.round(data.version) : 1,
+    parentVersionId: typeof data.parentVersionId === "string" && data.parentVersionId ? data.parentVersionId : undefined,
+    versionNote: typeof data.versionNote === "string" ? data.versionNote : undefined,
+    updatedAt: typeof data.updatedAt === "string" && data.updatedAt ? data.updatedAt : undefined
   };
 }
 

@@ -36,6 +36,8 @@ type Creation = {
   sourceCreationId?: string;
   sourceCreationName?: string;
   isReplicate?: boolean;
+  fragranceStructure?: FragranceStructure;
+  phaseDescriptions?: Record<FragrancePhase, string>;
 };
 
 type ReplicateResult = {
@@ -58,6 +60,24 @@ type ImportResult = {
 type HistoryReplicateFilter = "all" | "original" | "replicate";
 type HistorySortOption = "created-desc" | "created-asc" | "score-desc" | "score-asc";
 
+type FragrancePhase = "top" | "middle" | "base";
+
+type PhaseProfile = {
+  phase: FragrancePhase;
+  traits: Record<Trait, number>;
+  dominantTrait: Trait;
+  noteNames: string[];
+  totalDrops: number;
+};
+
+type FragranceStructure = {
+  top: PhaseProfile | null;
+  middle: PhaseProfile | null;
+  base: PhaseProfile | null;
+  overallTraits: Record<Trait, number>;
+  phaseCount: number;
+};
+
 const storageKey = "hxwl-1-creations";
 
 const MAX_NOTES = 5;
@@ -73,6 +93,20 @@ const traitLabels: Record<Trait, string> = {
   wood: "木质",
   spice: "辛辣"
 };
+
+const phaseLabels: Record<FragrancePhase, string> = {
+  top: "前调",
+  middle: "中调",
+  base: "后调"
+};
+
+function getNotePhase(note: Note): FragrancePhase {
+  const t = note.traits;
+  const maxVal = Math.max(t.fresh, t.sweet, t.wood, t.spice);
+  if (t.fresh === maxVal) return "top";
+  if (t.wood === maxVal) return "base";
+  return "middle";
+}
 
 const notes: Note[] = [
   {
@@ -443,7 +477,9 @@ function normalizeCreation(data: Partial<Creation> & { id: string }): Creation {
     createdAt: typeof data.createdAt === "string" && data.createdAt ? data.createdAt : new Date().toISOString(),
     sourceCreationId: typeof data.sourceCreationId === "string" && data.sourceCreationId ? data.sourceCreationId : undefined,
     sourceCreationName: typeof data.sourceCreationName === "string" && data.sourceCreationName ? data.sourceCreationName : undefined,
-    isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false
+    isReplicate: typeof data.isReplicate === "boolean" ? data.isReplicate : false,
+    fragranceStructure: data.fragranceStructure && typeof data.fragranceStructure === "object" ? data.fragranceStructure : undefined,
+    phaseDescriptions: data.phaseDescriptions && typeof data.phaseDescriptions === "object" ? data.phaseDescriptions : undefined
   };
 }
 
@@ -477,6 +513,53 @@ function getTotalDrops(selected: SelectedNote[]): number {
   return selected.reduce((sum, item) => sum + item.drops, 0);
 }
 
+function computeFragranceStructure(
+  selected: SelectedNote[],
+  overallTraits: Record<Trait, number>
+): FragranceStructure {
+  const phaseItems: Record<FragrancePhase, { note: Note; drops: number }[]> = {
+    top: [],
+    middle: [],
+    base: []
+  };
+
+  for (const item of selected) {
+    const note = getNoteById(item.noteId);
+    if (note) {
+      const phase = getNotePhase(note);
+      phaseItems[phase].push({ note, drops: item.drops });
+    }
+  }
+
+  function buildPhaseProfile(
+    phase: FragrancePhase,
+    items: { note: Note; drops: number }[]
+  ): PhaseProfile | null {
+    if (items.length === 0) return null;
+    const traits: Record<Trait, number> = { fresh: 0, sweet: 0, wood: 0, spice: 0 };
+    let totalDrops = 0;
+    const noteNames: string[] = [];
+    for (const { note, drops } of items) {
+      (Object.keys(traits) as Trait[]).forEach((t) => {
+        traits[t] += note.traits[t] * drops;
+      });
+      totalDrops += drops;
+      noteNames.push(note.name);
+    }
+    const dominantTrait = (Object.keys(traits) as Trait[]).sort(
+      (a, b) => traits[b] - traits[a]
+    )[0];
+    return { phase, traits, dominantTrait, noteNames, totalDrops };
+  }
+
+  const top = buildPhaseProfile("top", phaseItems.top);
+  const middle = buildPhaseProfile("middle", phaseItems.middle);
+  const base = buildPhaseProfile("base", phaseItems.base);
+  const phaseCount = [top, middle, base].filter(Boolean).length;
+
+  return { top, middle, base, overallTraits, phaseCount };
+}
+
 function loadHistory(): Creation[] {
   try {
     const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
@@ -493,6 +576,7 @@ function loadHistory(): Creation[] {
 }
 
 function describe(traits: Record<Trait, number>, selected: SelectedNote[]) {
+  const structure = computeFragranceStructure(selected, traits);
   const topTrait = (Object.keys(traits) as Trait[]).sort((a, b) => traits[b] - traits[a])[0];
   const totalDrops = getTotalDrops(selected);
   const uniqueNotes = selected.length;
@@ -502,7 +586,17 @@ function describe(traits: Record<Trait, number>, selected: SelectedNote[]) {
   const dropDiversityBonus = uniqueNotes >= 4 ? 8 : uniqueNotes >= 3 ? 5 : uniqueNotes >= 2 ? 3 : 0;
   const concentrationBonus = Math.min(totalDrops * 1.2, 18);
   const balanceBonus = balancedTraits * 4;
-  const score = Math.min(98, 40 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20));
+
+  const phaseBonus = structure.phaseCount >= 3 ? 8 : structure.phaseCount >= 2 ? 4 : 0;
+  let structureTransitionBonus = 0;
+  if (
+    structure.top && structure.top.dominantTrait === "fresh" &&
+    structure.middle && (structure.middle.dominantTrait === "sweet" || structure.middle.dominantTrait === "spice") &&
+    structure.base && structure.base.dominantTrait === "wood"
+  ) {
+    structureTransitionBonus = 5;
+  }
+  const score = Math.min(98, 35 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20) + phaseBonus + structureTransitionBonus);
 
   const nameParts: Record<Trait, string[]> = {
     fresh: ["晨雾", "玻璃雨", "青叶"],
@@ -510,15 +604,76 @@ function describe(traits: Record<Trait, number>, selected: SelectedNote[]) {
     wood: ["木匣", "旧书", "雪松"],
     spice: ["火星", "胡椒月", "赤信"]
   };
-  const suffix = totalDrops >= 15 ? "浓香水" : totalDrops >= 8 ? "淡香精" : uniqueNotes >= 4 ? "复调" : uniqueNotes >= 2 ? "短诗" : "试香";
-  const name = `${nameParts[topTrait][Math.floor(traits[topTrait] / 3) % 3]}${suffix}`;
-  const descriptionMap: Record<Trait, string> = {
-    fresh: "像刚打开的窗，干净、轻快，适合雨后出门。",
-    sweet: "有柔软的果香和一点暖意，像藏在衣袋里的糖纸。",
-    wood: "结构清楚，尾调安静，适合慢慢靠近。",
-    spice: "第一秒就有亮点，辛香让整瓶作品更有脾气。"
+
+  const suffix = totalDrops >= 15 ? "浓香水" : totalDrops >= 8 ? "淡香精" : structure.phaseCount >= 3 ? "三调" : uniqueNotes >= 4 ? "复调" : uniqueNotes >= 2 ? "短诗" : "试香";
+
+  let name: string;
+  if (structure.phaseCount >= 3 && structure.top && structure.middle && structure.base) {
+    const topWord = nameParts[structure.top.dominantTrait][Math.floor(traits[structure.top.dominantTrait] / 3) % 3];
+    const midWord = nameParts[structure.middle.dominantTrait][Math.floor(traits[structure.middle.dominantTrait] / 3) % 3];
+    const baseWord = nameParts[structure.base.dominantTrait][Math.floor(traits[structure.base.dominantTrait] / 3) % 3];
+    name = `${topWord}·${midWord}·${baseWord}${suffix}`;
+  } else if (structure.phaseCount === 2) {
+    const present = [structure.top, structure.middle, structure.base].filter((p): p is PhaseProfile => p !== null);
+    const w1 = nameParts[present[0].dominantTrait][Math.floor(traits[present[0].dominantTrait] / 3) % 3];
+    const w2 = nameParts[present[1].dominantTrait][Math.floor(traits[present[1].dominantTrait] / 3) % 3];
+    name = `${w1}·${w2}${suffix}`;
+  } else {
+    name = `${nameParts[topTrait][Math.floor(traits[topTrait] / 3) % 3]}${suffix}`;
+  }
+
+  const phaseDescMap: Record<FragrancePhase, Record<Trait, string>> = {
+    top: {
+      fresh: "清新的绿意率先拂面，带着晨露般的透明感。",
+      sweet: "轻柔的甜香开场，像远处飘来的果香。",
+      wood: "沉稳的木质首先浮现，出人意料的开场。",
+      spice: "辛辣的火花率先绽放，大胆而鲜明。"
+    },
+    middle: {
+      fresh: "清新的气息延续，如微风穿行花间。",
+      sweet: "甜美的核心逐渐绽放，包裹住整个嗅觉。",
+      wood: "木质的中调沉稳展开，像翻开一本旧书。",
+      spice: "辛香在心脏位置发热，带着温暖的个性。"
+    },
+    base: {
+      fresh: "淡淡的清新留到最后，像雨后的空气。",
+      sweet: "甜意绵延至尾声，像化不开的糖纸。",
+      wood: "木质底色悠长而安静，是最后的记忆。",
+      spice: "辛香的余温不散，带着微妙的暖意。"
+    }
   };
-  return { score: Math.round(score), name, description: descriptionMap[topTrait] };
+
+  const phaseDescriptions: Record<FragrancePhase, string> = {
+    top: structure.top ? phaseDescMap.top[structure.top.dominantTrait] : "",
+    middle: structure.middle ? phaseDescMap.middle[structure.middle.dominantTrait] : "",
+    base: structure.base ? phaseDescMap.base[structure.base.dominantTrait] : ""
+  };
+
+  let description: string;
+  if (structure.phaseCount >= 3 && structure.top && structure.middle && structure.base) {
+    description = `前调${phaseDescriptions.top}中调${phaseDescriptions.middle}后调${phaseDescriptions.base}三调层次分明，是一支完整的小诗。`;
+  } else if (structure.phaseCount === 2) {
+    const present = [structure.top, structure.middle, structure.base].filter((p): p is PhaseProfile => p !== null);
+    const firstLabel = phaseLabels[present[0].phase];
+    const secondLabel = phaseLabels[present[1].phase];
+    description = `${firstLabel}${phaseDescMap[present[0].phase][present[0].dominantTrait]}随后${secondLabel}${phaseDescMap[present[1].phase][present[1].dominantTrait]}双层香气缓缓交替。`;
+  } else {
+    const singleDescMap: Record<Trait, string> = {
+      fresh: "像刚打开的窗，干净、轻快，适合雨后出门。",
+      sweet: "有柔软的果香和一点暖意，像藏在衣袋里的糖纸。",
+      wood: "结构清楚，尾调安静，适合慢慢靠近。",
+      spice: "第一秒就有亮点，辛香让整瓶作品更有脾气。"
+    };
+    description = singleDescMap[topTrait];
+  }
+
+  return {
+    score: Math.round(score),
+    name,
+    description,
+    fragranceStructure: structure,
+    phaseDescriptions
+  };
 }
 
 function analyzeReplicability(
@@ -788,7 +943,8 @@ function getAllUnlockProgress(
 function estimateScoreFromTraitsAndNotes(
   traits: Record<Trait, number>,
   noteCount: number,
-  totalDrops: number
+  totalDrops: number,
+  selectedNotes?: SelectedNote[]
 ): number {
   const maxTraitValue = Math.max(...Object.values(traits));
   const dropDiversityBonus = noteCount >= 4 ? 8 : noteCount >= 3 ? 5 : noteCount >= 2 ? 3 : 0;
@@ -797,7 +953,21 @@ function estimateScoreFromTraitsAndNotes(
     (value) => value >= Math.max(...Object.values(traits)) * 0.4
   ).length;
   const balanceBonus = balancedTraits * 4;
-  return Math.min(98, Math.round(40 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20)));
+
+  let phaseBonus = 0;
+  if (selectedNotes && selectedNotes.length > 0) {
+    const structure = computeFragranceStructure(selectedNotes, traits);
+    phaseBonus = structure.phaseCount >= 3 ? 8 : structure.phaseCount >= 2 ? 4 : 0;
+    if (
+      structure.top && structure.top.dominantTrait === "fresh" &&
+      structure.middle && (structure.middle.dominantTrait === "sweet" || structure.middle.dominantTrait === "spice") &&
+      structure.base && structure.base.dominantTrait === "wood"
+    ) {
+      phaseBonus += 5;
+    }
+  }
+
+  return Math.min(98, Math.round(35 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20) + phaseBonus));
 }
 
 function suggestUnlockRecipes(
@@ -833,7 +1003,7 @@ function suggestUnlockRecipes(
         targetNote,
         recipe,
         estimatedTraits: traits,
-        estimatedScore: estimateScoreFromTraitsAndNotes(traits, 1, dropsNeeded),
+        estimatedScore: estimateScoreFromTraitsAndNotes(traits, 1, dropsNeeded, recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))),
         reason: `主打「${topNote.name}」${dropsNeeded} 滴，单香调突破`,
         isScoreType
       };
@@ -859,7 +1029,7 @@ function suggestUnlockRecipes(
           targetNote,
           recipe,
           estimatedTraits: traits,
-          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 2, total),
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 2, total, recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))),
           reason: `「${top2[0].name}」+「${top2[1].name}」双香调叠加`,
           isScoreType
         };
@@ -879,7 +1049,7 @@ function suggestUnlockRecipes(
           targetNote,
           recipe,
           estimatedTraits: traits,
-          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 3, total),
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 3, total, recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))),
           reason: `三香调复调，平衡+高分`,
           isScoreType
         };
@@ -919,7 +1089,7 @@ function suggestUnlockRecipes(
         targetNote,
         recipe,
         estimatedTraits: traits,
-        estimatedScore: estimateScoreFromTraitsAndNotes(traits, recipe.length, total),
+        estimatedScore: estimateScoreFromTraitsAndNotes(traits, recipe.length, total, recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))),
         reason: `多香调平衡配方，冲高分`,
         isScoreType
       });
@@ -941,7 +1111,7 @@ function suggestUnlockRecipes(
           targetNote,
           recipe: recipe2,
           estimatedTraits: traits2,
-          estimatedScore: estimateScoreFromTraitsAndNotes(traits2, 3, total2),
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits2, 3, total2, recipe2.map((r) => ({ noteId: r.note.id, drops: r.drops }))),
           reason: `高特质香调组合，最大化浓度分`,
           isScoreType
         });
@@ -1342,7 +1512,9 @@ export default function App() {
       createdAt: new Date().toISOString(),
       sourceCreationId: replicateSource?.id,
       sourceCreationName: replicateSource?.name,
-      isReplicate: !!replicateSource
+      isReplicate: !!replicateSource,
+      fragranceStructure: current!.fragranceStructure,
+      phaseDescriptions: current!.phaseDescriptions
     };
     const newlyUnlockedNotes = getNewlyUnlockedNotes(
       traits,
@@ -1652,7 +1824,9 @@ export default function App() {
       createdAt: creation.createdAt,
       sourceCreationId: creation.sourceCreationId,
       sourceCreationName: creation.sourceCreationName,
-      isReplicate: creation.isReplicate
+      isReplicate: creation.isReplicate,
+      fragranceStructure: creation.fragranceStructure,
+      phaseDescriptions: creation.phaseDescriptions
     }));
     const jsonData = JSON.stringify(exportData, null, 2);
     const blob = new Blob([jsonData], { type: "application/json" });
@@ -2094,6 +2268,9 @@ export default function App() {
                   {!unlocked && <div className="lock-overlay"><span className="lock-icon">🔒</span></div>}
                   <span className="swatch" style={{ background: unlocked ? note.color : "#ccc" }} />
                   <strong style={{ opacity: unlocked ? 1 : 0.5 }}>{note.name}</strong>
+                  <span className={`phase-badge-mini phase-badge-mini-${getNotePhase(note)}`}>
+                    {phaseLabels[getNotePhase(note)]}
+                  </span>
                   <small style={{ opacity: unlocked ? 1 : 0.5 }}>
                     {unlocked ? note.profile : note.unlockCondition?.description || "未解锁"}
                   </small>
@@ -2172,6 +2349,9 @@ export default function App() {
                   >
                     <span className="swatch small-swatch" style={{ background: note.color }} />
                     {note.name}
+                    <span className={`phase-badge-mini phase-badge-mini-${getNotePhase(note)}`}>
+                      {phaseLabels[getNotePhase(note)]}
+                    </span>
                   </button>
                   <div className="drops-controller">
                     <button
@@ -2208,6 +2388,29 @@ export default function App() {
               </label>
             ))}
           </div>
+          {current && current.fragranceStructure && current.fragranceStructure.phaseCount >= 2 && (
+            <div className="lab-phase-preview">
+              <div className="lab-phase-preview-header">
+                <span className="lab-phase-preview-title">香气结构</span>
+                <span className="lab-phase-count">{current.fragranceStructure.phaseCount}层</span>
+              </div>
+              <div className="lab-phase-preview-list">
+                {(["top", "middle", "base"] as FragrancePhase[]).map((phase) => {
+                  const profile = current.fragranceStructure![phase];
+                  if (!profile) return null;
+                  return (
+                    <div key={phase} className={`lab-phase-row lab-phase-${phase}`}>
+                      <span className={`phase-badge phase-badge-${phase}`}>{phaseLabels[phase]}</span>
+                      <span className="lab-phase-notes">{profile.noteNames.join("、")}</span>
+                      <span className="lab-phase-dominant" style={{ color: getTraitColor(profile.dominantTrait) }}>
+                        {traitLabels[profile.dominantTrait]}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="result">
             {current ? (
               <>
@@ -2638,6 +2841,14 @@ export default function App() {
                                   {c.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
                                 </strong>
                                 <span className="calendar-creation-notes">{(c.notes || []).join(" / ") || "无香调记录"}</span>
+                                {c.fragranceStructure && (
+                                  <span className="calendar-creation-phase">
+                                    {(["top", "middle", "base"] as FragrancePhase[])
+                                      .filter((p) => c.fragranceStructure![p])
+                                      .map((p) => phaseLabels[p])
+                                      .join("→")}
+                                  </span>
+                                )}
                               </div>
                             </button>
                           ))}
@@ -2698,6 +2909,9 @@ export default function App() {
                 )}
               </h2>
               <p className="drawer-profile">{activeNote.profile}</p>
+              <span className={`phase-badge phase-badge-${getNotePhase(activeNote)}`}>
+                {phaseLabels[getNotePhase(activeNote)]}香调
+              </span>
               {!unlockedNoteIds.includes(activeNote.id) && activeNote.unlockCondition && (
                 <div className="unlock-condition-box">
                   <h3>解锁条件</h3>
@@ -2856,6 +3070,44 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {activeCreation.fragranceStructure && (
+                <div className="creation-section">
+                  <h3>香气结构</h3>
+                  <div className="phase-breakdown">
+                    {(["top", "middle", "base"] as FragrancePhase[]).map((phase) => {
+                      const profile = activeCreation.fragranceStructure![phase];
+                      if (!profile) return null;
+                      const phaseDesc = activeCreation.phaseDescriptions?.[phase] || "";
+                      return (
+                        <div key={phase} className={`phase-card phase-card-${phase}`}>
+                          <div className="phase-card-header">
+                            <span className={`phase-badge phase-badge-${phase}`}>{phaseLabels[phase]}</span>
+                            <span className="phase-dominant">{traitLabels[profile.dominantTrait]}主导</span>
+                          </div>
+                          <div className="phase-card-notes">
+                            {profile.noteNames.map((name, i) => (
+                              <span key={i} className="phase-note-tag">{name}</span>
+                            ))}
+                          </div>
+                          {phaseDesc && <p className="phase-card-desc">{phaseDesc}</p>}
+                          <div className="phase-card-traits">
+                            {(Object.keys(traitLabels) as Trait[]).map((trait) => {
+                              const val = profile.traits[trait];
+                              if (val === 0) return null;
+                              return (
+                                <span key={trait} className="phase-trait-chip" style={{ borderColor: getTraitColor(trait) }}>
+                                  {traitLabels[trait]} {val}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="creation-actions">
                 {(() => {
@@ -3370,6 +3622,31 @@ function CompareCard({ creation, side }: { creation: Creation | null; side: "lef
           </div>
         )}
       </div>
+
+      {creation.fragranceStructure && (
+        <div className="compare-card-section">
+          <h4>香气结构</h4>
+          <div className="compare-phase-breakdown">
+            {(["top", "middle", "base"] as FragrancePhase[]).map((phase) => {
+              const profile = creation.fragranceStructure![phase];
+              if (!profile) return null;
+              return (
+                <div key={phase} className={`compare-phase-item compare-phase-${phase}`}>
+                  <span className={`compare-phase-badge compare-phase-badge-${phase}`}>
+                    {phaseLabelsStandalone[phase]}
+                  </span>
+                  <span className="compare-phase-notes">
+                    {profile.noteNames.join("、")}
+                  </span>
+                  <span className="compare-phase-dominant" style={{ color: getTraitColorStandalone(profile.dominantTrait) }}>
+                    {traitLabelsStandalone[profile.dominantTrait]}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3394,6 +3671,12 @@ const traitLabelsStandalone: Record<Trait, string> = {
   sweet: "甜度",
   wood: "木质",
   spice: "辛辣"
+};
+
+const phaseLabelsStandalone: Record<FragrancePhase, string> = {
+  top: "前调",
+  middle: "中调",
+  base: "后调"
 };
 
 function getTraitColorStandalone(trait: Trait): string {

@@ -3524,3 +3524,266 @@ meter {
     padding: 16px;
   }
 }
+
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.phase-badge-top {
+  background: rgba(117, 199, 165, 0.15);
+  color: #3a8a6a;
+  border: 1px solid rgba(117, 199, 165, 0.35);
+}
+
+.phase-badge-middle {
+  background: rgba(244, 201, 93, 0.15);
+  color: #8a6a1a;
+  border: 1px solid rgba(244, 201, 93, 0.35);
+}
+
+.phase-badge-base {
+  background: rgba(183, 123, 84, 0.15);
+  color: #7a5030;
+  border: 1px solid rgba(183, 123, 84, 0.35);
+}
+
+.phase-badge-mini {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.phase-badge-mini-top {
+  background: rgba(117, 199, 165, 0.18);
+  color: #3a8a6a;
+}
+
+.phase-badge-mini-middle {
+  background: rgba(244, 201, 93, 0.18);
+  color: #8a6a1a;
+}
+
+.phase-badge-mini-base {
+  background: rgba(183, 123, 84, 0.18);
+  color: #7a5030;
+}
+
+.phase-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phase-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(58, 42, 28, 0.08);
+}
+
+.phase-card-top {
+  background: linear-gradient(135deg, rgba(117, 199, 165, 0.08), rgba(117, 199, 165, 0.02));
+  border-color: rgba(117, 199, 165, 0.2);
+}
+
+.phase-card-middle {
+  background: linear-gradient(135deg, rgba(244, 201, 93, 0.08), rgba(244, 201, 93, 0.02));
+  border-color: rgba(244, 201, 93, 0.2);
+}
+
+.phase-card-base {
+  background: linear-gradient(135deg, rgba(183, 123, 84, 0.08), rgba(183, 123, 84, 0.02));
+  border-color: rgba(183, 123, 84, 0.2);
+}
+
+.phase-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.phase-dominant {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5d5248;
+}
+
+.phase-card-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.phase-note-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #3f342b;
+  border: 1px solid rgba(58, 42, 28, 0.08);
+}
+
+.phase-card-desc {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: #5d5248;
+  line-height: 1.5;
+}
+
+.phase-card-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.phase-trait-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.lab-phase-preview {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(58, 42, 28, 0.03);
+  border-radius: 10px;
+  border: 1px dashed rgba(58, 42, 28, 0.1);
+}
+
+.lab-phase-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lab-phase-preview-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #3f342b;
+}
+
+.lab-phase-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8a8072;
+  background: rgba(58, 42, 28, 0.06);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.lab-phase-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lab-phase-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.lab-phase-notes {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #5d5248;
+  font-weight: 500;
+}
+
+.lab-phase-dominant {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.compare-phase-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.compare-phase-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(58, 42, 28, 0.03);
+}
+
+.compare-phase-top {
+  border-left: 3px solid #75c7a5;
+}
+
+.compare-phase-middle {
+  border-left: 3px solid #f4c95d;
+}
+
+.compare-phase-base {
+  border-left: 3px solid #b77b54;
+}
+
+.compare-phase-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 32px;
+  text-align: center;
+}
+
+.compare-phase-badge-top {
+  color: #3a8a6a;
+}
+
+.compare-phase-badge-middle {
+  color: #8a6a1a;
+}
+
+.compare-phase-badge-base {
+  color: #7a5030;
+}
+
+.compare-phase-notes {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #5d5248;
+}
+
+.compare-phase-dominant {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.calendar-creation-phase {
+  display: block;
+  font-size: 0.7rem;
+  color: #8a8072;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.note-card .phase-badge-mini {
+  display: block;
+  width: fit-content;
+  margin: 3px 0 0;
+}

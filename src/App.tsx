@@ -1374,6 +1374,11 @@ export default function App() {
     if (!current || selectedNotes.length === 0) return;
     if (!isValidForBottling) return;
     const { creation, newlyUnlockedNotes } = buildCurrentCreation();
+    if (editingSource?.isReplicate || editingSource?.sourceCreationId || editingSource?.sourceCreationName) {
+      creation.sourceCreationId = editingSource.sourceCreationId ?? editingSource.id;
+      creation.sourceCreationName = editingSource.sourceCreationName ?? editingSource.name;
+      creation.isReplicate = true;
+    }
     const next = [creation, ...history].slice(0, 50);
     setHistory(next);
     localStorage.setItem(storageKey, JSON.stringify(next));

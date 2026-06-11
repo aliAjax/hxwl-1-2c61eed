@@ -1085,6 +1085,224 @@ function buildRecipeFromCreation(
   return recipe;
 }
 
+function ensureRecipeValid(
+  recipe: { note: Note; drops: number }[]
+): { note: Note; drops: number }[] {
+  if (recipe.length === 0) return recipe;
+
+  let result = recipe.map((r) => ({
+    ...r,
+    drops: Math.max(MIN_DROPS_PER_NOTE, Math.min(MAX_DROPS_PER_NOTE, r.drops))
+  }));
+
+  let total = result.reduce((s, r) => s + r.drops, 0);
+
+  if (result.length === 1) {
+    result[0].drops = Math.max(MIN_TOTAL_DROPS, result[0].drops);
+    total = result[0].drops;
+  }
+
+  if (total < MIN_TOTAL_DROPS) {
+    let idx = 0;
+    while (total < MIN_TOTAL_DROPS && idx < 2000) {
+      const maxIdx = result.reduce(
+        (mi, it, i) => (it.drops < result[mi].drops ? i : mi),
+        0
+      );
+      if (result[maxIdx].drops < MAX_DROPS_PER_NOTE) {
+        result[maxIdx].drops += 1;
+        total += 1;
+      }
+      idx++;
+    }
+  }
+
+  if (total > MAX_TOTAL_DROPS) {
+    const scale = MAX_TOTAL_DROPS / total;
+    let scaled = result.map((r) => ({
+      ...r,
+      drops: Math.max(MIN_DROPS_PER_NOTE, Math.round(r.drops * scale))
+    }));
+    let scaledTotal = scaled.reduce((s, r) => s + r.drops, 0);
+    let idx = 0;
+    while (scaledTotal > MAX_TOTAL_DROPS && idx < 2000) {
+      const maxIdx = scaled.reduce(
+        (mi, it, i) => (it.drops > scaled[mi].drops ? i : mi),
+        0
+      );
+      if (scaled[maxIdx].drops > MIN_DROPS_PER_NOTE) {
+        scaled[maxIdx].drops -= 1;
+        scaledTotal -= 1;
+      }
+      idx++;
+    }
+    while (scaledTotal < MIN_TOTAL_DROPS && scaled.length > 0 && idx < 4000) {
+      const minIdx = scaled.reduce(
+        (mi, it, i) => (it.drops < scaled[mi].drops ? i : mi),
+        0
+      );
+      if (scaled[minIdx].drops < MAX_DROPS_PER_NOTE) {
+        scaled[minIdx].drops += 1;
+        scaledTotal += 1;
+      }
+      idx++;
+    }
+    result = scaled;
+  }
+
+  return result.map((r) => ({
+    ...r,
+    drops: Math.max(
+      result.length === 1 ? MIN_TOTAL_DROPS : MIN_DROPS_PER_NOTE,
+      Math.min(MAX_DROPS_PER_NOTE, r.drops)
+    )
+  }));
+}
+
+function buildTraitTargetRecipe(
+  unlockedNotesList: Note[],
+  targetTrait: Trait,
+  remaining: number,
+  noteCount: number = 1
+): { recipe: { note: Note; drops: number }[]; reason: string } {
+  const traitNotes = unlockedNotesList
+    .filter((n) => n.traits[targetTrait] > 0)
+    .sort((a, b) => b.traits[targetTrait] - a.traits[targetTrait]);
+
+  if (traitNotes.length === 0) {
+    const fallback = unlockedNotesList.slice(0, Math.min(noteCount, MAX_NOTES));
+    const recipe = ensureRecipeValid(
+      fallback.map((n) => ({ note: n, drops: Math.max(MIN_DROPS_PER_NOTE, 3) }))
+    );
+    return { recipe, reason: `基础配方尝试` };
+  }
+
+  const topNotes = traitNotes.slice(0, Math.min(noteCount, MAX_NOTES, traitNotes.length));
+  const totalTraitPerDrop = topNotes.reduce((s, n) => s + n.traits[targetTrait], 0);
+  const baseDrops = Math.max(1, Math.ceil(remaining / Math.max(1, totalTraitPerDrop)) + 2);
+
+  const recipe = ensureRecipeValid(
+    topNotes.map((n, i) => ({
+      note: n,
+      drops: Math.max(MIN_DROPS_PER_NOTE, baseDrops - Math.min(2, i))
+    }))
+  );
+
+  if (noteCount === 1) {
+    return {
+      recipe,
+      reason: `单香调主打「${topNotes[0].name}」，最大化${traitLabels[targetTrait]}`
+    };
+  } else if (noteCount === 2) {
+    return {
+      recipe,
+      reason: `双香调叠加「${topNotes[0].name}」+「${topNotes[1]?.name || ""}」`
+    };
+  } else {
+    return {
+      recipe,
+      reason: `${noteCount}种高${traitLabels[targetTrait]}香调复配`
+    };
+  }
+}
+
+function buildScoreTargetRecipe(
+  unlockedNotesList: Note[],
+  strategy: "balanced" | "trait-focused" | "max-diversity"
+): { recipe: { note: Note; drops: number }[]; reason: string } {
+  if (strategy === "balanced" || unlockedNotesList.length < 3) {
+    const count = Math.min(MAX_NOTES, Math.max(2, unlockedNotesList.length));
+    const notes = unlockedNotesList.slice(0, count);
+    const recipe = ensureRecipeValid(
+      notes.map((n) => ({
+        note: n,
+        drops: Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / count))
+      }))
+    );
+    return {
+      recipe,
+      reason: `均衡搭配${count}种香调，追求平衡高分`,
+    };
+  }
+
+  if (strategy === "trait-focused") {
+    const byTrait: Record<Trait, Note[]> = { fresh: [], sweet: [], wood: [], spice: [] };
+    unlockedNotesList.forEach((n) => {
+      (Object.keys(byTrait) as Trait[]).forEach((t) => {
+        if (n.traits[t] >= 2) byTrait[t].push(n);
+      });
+    });
+    const sortedTraits = (Object.keys(byTrait) as Trait[]).sort(
+      (a, b) => byTrait[b].length - byTrait[a].length
+    );
+    const picks: Note[] = [];
+    for (const t of sortedTraits) {
+      if (byTrait[t].length > 0 && picks.length < MAX_NOTES) {
+        picks.push(byTrait[t][0]);
+      }
+    }
+    if (picks.length < 2) {
+      return buildScoreTargetRecipe(unlockedNotesList, "balanced");
+    }
+    const recipe = ensureRecipeValid(
+      picks.map((n) => ({
+        note: n,
+        drops: Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / picks.length))
+      }))
+    );
+    return {
+      recipe,
+      reason: `高特质香调组合，最大化浓度分`,
+    };
+  }
+
+  const uniqueTraitNotes: Note[] = [];
+  const coveredTraits = new Set<Trait>();
+  for (const n of unlockedNotesList) {
+    const traits = (Object.keys(n.traits) as Trait[]).filter((t) => n.traits[t] >= 2);
+    if (traits.length > 0 && traits.some((t) => !coveredTraits.has(t))) {
+      uniqueTraitNotes.push(n);
+      traits.forEach((t) => coveredTraits.add(t));
+    }
+    if (uniqueTraitNotes.length >= MAX_NOTES) break;
+  }
+  if (uniqueTraitNotes.length < 3) {
+    return buildScoreTargetRecipe(unlockedNotesList, "trait-focused");
+  }
+  const recipe = ensureRecipeValid(
+    uniqueTraitNotes.map((n) => ({
+      note: n,
+      drops: Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / uniqueTraitNotes.length))
+    }))
+  );
+  return {
+    recipe,
+    reason: `${uniqueTraitNotes.length}维度全覆盖，追求综合极限高分`,
+  };
+}
+
+function recipeToSuggestion(
+  recipe: { note: Note; drops: number }[],
+  targetNote: Note,
+  isScoreType: boolean,
+  reason: string,
+  strategy: "incremental" | "historical" | "extreme"
+): UnlockRecipeSuggestion {
+  const validRecipe = ensureRecipeValid(recipe);
+  const selected = validRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }));
+  const traits = computeTraitsFromSelected(selected);
+  const total = validRecipe.reduce((s, r) => s + r.drops, 0);
+  return {
+    targetNote,
+    recipe: validRecipe,
+    estimatedTraits: traits,
+    estimatedScore: estimateScoreFromTraitsAndNotes(traits, validRecipe.length, total, selected),
+    reason,
+    isScoreType,
+    strategy
+  };
+}
+
 function suggestUnlockRecipes(
   targetProgress: NoteUnlockProgress,
   unlockedNoteIds: string[],
@@ -1109,6 +1327,28 @@ function suggestUnlockRecipes(
   const currentTraitsBase = computeTraitsFromSelected(currentSelected);
   const needMore = remaining > 0;
 
+  const getRecipeSignature = (recipe: { note: Note; drops: number }[]): string => {
+    return recipe
+      .map((r) => `${r.note.id}:${r.drops}`)
+      .sort()
+      .join("|");
+  };
+
+  const existingSignatures = new Set<string>();
+
+  const addIfUnique = (suggestion: UnlockRecipeSuggestion | null) => {
+    if (!suggestion || suggestion.recipe.length === 0) return false;
+    const sig = getRecipeSignature(suggestion.recipe);
+    if (existingSignatures.has(sig)) return false;
+    existingSignatures.add(sig);
+    suggestions.push(suggestion);
+    return true;
+  };
+
+  const hasStrategy = (strategy: "incremental" | "historical" | "extreme"): boolean => {
+    return suggestions.some((s) => s.strategy === strategy);
+  };
+
   if (!isScoreType && targetNote.unlockCondition?.trait) {
     const targetTrait = targetNote.unlockCondition.trait;
 
@@ -1116,192 +1356,253 @@ function suggestUnlockRecipes(
       .filter((n) => n.traits[targetTrait] > 0)
       .sort((a, b) => b.traits[targetTrait] - a.traits[targetTrait]);
 
-    if (traitNotes.length === 0) return suggestions;
-
-    const incrementalRecipe = (() => {
-      if (existingNotes.length === 0) return null;
-
-      const currentTraitVal = currentTraitsBase[targetTrait];
-      if (!needMore && currentTraitVal >= targetValue) {
-        const traits = computeTraitsFromSelected(
-          existingNotes.map((e) => ({ noteId: e.note.id, drops: e.drops }))
-        );
-        const total = existingNotes.reduce((s, e) => s + e.drops, 0);
-        return {
-          recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
-          traits,
-          total,
-          reason: `当前配方已满足条件，可直接封瓶`
-        };
-      }
-
-      const needed = Math.max(0, targetValue - currentTraitVal);
-      const availableSlots = MAX_NOTES - existingNotes.length;
-      if (availableSlots <= 0) {
-        const bestTraitNote = existingNotes
-          .slice()
-          .sort((a, b) => b.note.traits[targetTrait] - a.note.traits[targetTrait])[0];
-        if (!bestTraitNote || bestTraitNote.note.traits[targetTrait] === 0) return null;
-
-        const currentTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
-        const availableDrops = MAX_TOTAL_DROPS - currentTotal;
-        if (availableDrops <= 0) return null;
-
-        const extraDrops = Math.min(
-          availableDrops,
-          Math.ceil(needed / bestTraitNote.note.traits[targetTrait])
-        );
-        const recipe = existingNotes.map((e) =>
-          e.note.id === bestTraitNote.note.id
-            ? { note: e.note, drops: Math.min(MAX_DROPS_PER_NOTE, e.drops + extraDrops) }
-            : { note: e.note, drops: e.drops }
-        );
-        const total = recipe.reduce((s, r) => s + r.drops, 0);
-        const traits = computeTraitsFromSelected(
-          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        );
-        return {
-          recipe,
-          traits,
-          total,
-          reason: `增加「${bestTraitNote.note.name}」${extraDrops} 滴，补足${traitLabels[targetTrait]}`
-        };
-      }
-
-      const newTraitNotes = traitNotes.filter((n) => !existingIds.has(n.id));
-      if (newTraitNotes.length === 0) {
-        const bestTraitNote = existingNotes
-          .slice()
-          .sort((a, b) => b.note.traits[targetTrait] - a.note.traits[targetTrait])[0];
-        if (!bestTraitNote || bestTraitNote.note.traits[targetTrait] === 0) return null;
-
-        const currentTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
-        const availableDrops = MAX_TOTAL_DROPS - currentTotal;
-        if (availableDrops <= 0) return null;
-
-        const extraDrops = Math.min(
-          availableDrops,
-          Math.max(1, Math.ceil(needed / bestTraitNote.note.traits[targetTrait]))
-        );
-        const recipe = existingNotes.map((e) =>
-          e.note.id === bestTraitNote.note.id
-            ? { note: e.note, drops: Math.min(MAX_DROPS_PER_NOTE, e.drops + extraDrops) }
-            : { note: e.note, drops: e.drops }
-        );
-        const total = recipe.reduce((s, r) => s + r.drops, 0);
-        const traits = computeTraitsFromSelected(
-          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        );
-        return {
-          recipe,
-          traits,
-          total,
-          reason: `提浓「${bestTraitNote.note.name}」，增加 ${extraDrops} 滴`
-        };
-      }
-
-      const topNewNote = newTraitNotes[0];
-      const dropsToAdd = Math.min(
-        MAX_DROPS_PER_NOTE,
-        Math.max(1, Math.ceil(needed / topNewNote.traits[targetTrait]))
+    if (traitNotes.length === 0) {
+      const fallback = buildTraitTargetRecipe(unlockedNotesList, "fresh", remaining, 2);
+      addIfUnique(
+        recipeToSuggestion(fallback.recipe, targetNote, isScoreType, fallback.reason, "incremental")
       );
-      const existingTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
-      const safeDrops = Math.min(dropsToAdd, MAX_TOTAL_DROPS - existingTotal);
-      if (safeDrops < MIN_DROPS_PER_NOTE) return null;
+    } else {
+      const incrementalRecipe = (() => {
+        if (existingNotes.length === 0) {
+          const fallback = buildTraitTargetRecipe(unlockedNotesList, targetTrait, remaining, 2);
+          return {
+            recipe: fallback.recipe,
+            traits: computeTraitsFromSelected(
+              fallback.recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+            ),
+            total: fallback.recipe.reduce((s, r) => s + r.drops, 0),
+            reason: `推荐起点：${fallback.reason}`
+          };
+        }
 
-      const recipe = [
-        ...existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
-        { note: topNewNote, drops: safeDrops }
-      ];
-      const total = recipe.reduce((s, r) => s + r.drops, 0);
-      const traits = computeTraitsFromSelected(
-        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-      );
-      return {
-        recipe,
-        traits,
-        total,
-        reason: `加入「${topNewNote.name}」${safeDrops} 滴，在现有配方基础上突破`
-      };
-    })();
-
-    if (incrementalRecipe) {
-      suggestions.push({
-        targetNote,
-        recipe: incrementalRecipe.recipe,
-        estimatedTraits: incrementalRecipe.traits,
-        estimatedScore: estimateScoreFromTraitsAndNotes(
-          incrementalRecipe.traits,
-          incrementalRecipe.recipe.length,
-          incrementalRecipe.total,
-          incrementalRecipe.recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        ),
-        reason: incrementalRecipe.reason,
-        isScoreType,
-        strategy: "incremental"
-      });
-    }
-
-    const bestHistorical = findBestHistoricalCreation(targetNote, history, unlockedNoteIds);
-    if (bestHistorical) {
-      const histRecipe = buildRecipeFromCreation(
-        bestHistorical,
-        unlockedNoteIds,
-        targetTrait,
-        remaining
-      );
-      if (histRecipe && histRecipe.length > 0) {
-        const traits = computeTraitsFromSelected(
-          histRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        );
-        const total = histRecipe.reduce((s, r) => s + r.drops, 0);
-        suggestions.push({
-          targetNote,
-          recipe: histRecipe,
-          estimatedTraits: traits,
-          estimatedScore: estimateScoreFromTraitsAndNotes(
+        const currentTraitVal = currentTraitsBase[targetTrait];
+        if (!needMore && currentTraitVal >= targetValue) {
+          const traits = computeTraitsFromSelected(
+            existingNotes.map((e) => ({ noteId: e.note.id, drops: e.drops }))
+          );
+          const total = existingNotes.reduce((s, e) => s + e.drops, 0);
+          return {
+            recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
             traits,
-            histRecipe.length,
             total,
-            histRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+            reason: `当前配方已满足条件，可直接封瓶`
+          };
+        }
+
+        const needed = Math.max(0, targetValue - currentTraitVal);
+        const availableSlots = MAX_NOTES - existingNotes.length;
+        if (availableSlots <= 0) {
+          const bestTraitNote = existingNotes
+            .slice()
+            .sort((a, b) => b.note.traits[targetTrait] - a.note.traits[targetTrait])[0];
+          if (bestTraitNote && bestTraitNote.note.traits[targetTrait] > 0) {
+            const currentTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
+            const availableDrops = MAX_TOTAL_DROPS - currentTotal;
+            if (availableDrops > 0) {
+              const extraDrops = Math.min(
+                availableDrops,
+                Math.ceil(needed / bestTraitNote.note.traits[targetTrait])
+              );
+              const recipe = existingNotes.map((e) =>
+                e.note.id === bestTraitNote.note.id
+                  ? { note: e.note, drops: Math.min(MAX_DROPS_PER_NOTE, e.drops + extraDrops) }
+                  : { note: e.note, drops: e.drops }
+              );
+              const total = recipe.reduce((s, r) => s + r.drops, 0);
+              const traits = computeTraitsFromSelected(
+                recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+              );
+              return {
+                recipe,
+                traits,
+                total,
+                reason: `增加「${bestTraitNote.note.name}」${extraDrops} 滴，补足${traitLabels[targetTrait]}`
+              };
+            }
+          }
+          return {
+            recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+            traits: currentTraitsBase,
+            total: existingNotes.reduce((s, e) => s + e.drops, 0),
+            reason: `维持当前配方，尝试封瓶`
+          };
+        }
+
+        const newTraitNotes = traitNotes.filter((n) => !existingIds.has(n.id));
+        if (newTraitNotes.length === 0) {
+          const bestTraitNote = existingNotes
+            .slice()
+            .sort((a, b) => b.note.traits[targetTrait] - a.note.traits[targetTrait])[0];
+          if (bestTraitNote && bestTraitNote.note.traits[targetTrait] > 0) {
+            const currentTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
+            const availableDrops = MAX_TOTAL_DROPS - currentTotal;
+            if (availableDrops > 0) {
+              const extraDrops = Math.min(
+                availableDrops,
+                Math.max(1, Math.ceil(needed / bestTraitNote.note.traits[targetTrait]))
+              );
+              const recipe = existingNotes.map((e) =>
+                e.note.id === bestTraitNote.note.id
+                  ? { note: e.note, drops: Math.min(MAX_DROPS_PER_NOTE, e.drops + extraDrops) }
+                  : { note: e.note, drops: e.drops }
+              );
+              const total = recipe.reduce((s, r) => s + r.drops, 0);
+              const traits = computeTraitsFromSelected(
+                recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+              );
+              return {
+                recipe,
+                traits,
+                total,
+                reason: `提浓「${bestTraitNote.note.name}」，增加 ${extraDrops} 滴`
+              };
+            }
+          }
+          return {
+            recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+            traits: currentTraitsBase,
+            total: existingNotes.reduce((s, e) => s + e.drops, 0),
+            reason: `维持当前配方，尝试封瓶`
+          };
+        }
+
+        const topNewNote = newTraitNotes[0];
+        const dropsToAdd = Math.min(
+          MAX_DROPS_PER_NOTE,
+          Math.max(1, Math.ceil(needed / topNewNote.traits[targetTrait]))
+        );
+        const existingTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
+        const safeDrops = Math.max(
+          MIN_DROPS_PER_NOTE,
+          Math.min(dropsToAdd, MAX_TOTAL_DROPS - existingTotal)
+        );
+
+        const recipe = [
+          ...existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+          { note: topNewNote, drops: safeDrops }
+        ];
+        const total = recipe.reduce((s, r) => s + r.drops, 0);
+        const traits = computeTraitsFromSelected(
+          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        );
+        return {
+          recipe,
+          traits,
+          total,
+          reason: `加入「${topNewNote.name}」${safeDrops} 滴，在现有配方基础上突破`
+        };
+      })();
+
+      if (incrementalRecipe) {
+        addIfUnique({
+          targetNote,
+          recipe: ensureRecipeValid(incrementalRecipe.recipe),
+          estimatedTraits: incrementalRecipe.traits,
+          estimatedScore: estimateScoreFromTraitsAndNotes(
+            incrementalRecipe.traits,
+            incrementalRecipe.recipe.length,
+            incrementalRecipe.total,
+            incrementalRecipe.recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
           ),
-          reason: `参考历史最佳「${bestHistorical.name}」，经典配方验证`,
+          reason: incrementalRecipe.reason,
           isScoreType,
-          strategy: "historical"
+          strategy: "incremental"
         });
       }
-    }
 
-    if (traitNotes.length >= 1) {
-      const topNote = traitNotes[0];
-      const dropsNeeded = Math.min(
-        MAX_DROPS_PER_NOTE,
-        Math.max(MIN_TOTAL_DROPS, Math.ceil(remaining / Math.max(1, topNote.traits[targetTrait])) + 2)
-      );
-      const recipe = [{ note: topNote, drops: dropsNeeded }];
-      const traits = computeTraitsFromSelected(
-        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-      );
-      suggestions.push({
-        targetNote,
-        recipe,
-        estimatedTraits: traits,
-        estimatedScore: estimateScoreFromTraitsAndNotes(
-          traits,
-          1,
-          dropsNeeded,
-          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        ),
-        reason: `极致单香：「${topNote.name}」${dropsNeeded} 滴，最大化${traitLabels[targetTrait]}`,
-        isScoreType,
-        strategy: "extreme"
-      });
+      const bestHistorical = findBestHistoricalCreation(targetNote, history, unlockedNoteIds);
+      if (bestHistorical) {
+        const histRecipe = buildRecipeFromCreation(
+          bestHistorical,
+          unlockedNoteIds,
+          targetTrait,
+          remaining
+        );
+        if (histRecipe && histRecipe.length > 0) {
+          addIfUnique(
+            recipeToSuggestion(
+              histRecipe,
+              targetNote,
+              isScoreType,
+              `参考历史最佳「${bestHistorical.name}」，经典配方验证`,
+              "historical"
+            )
+          );
+        }
+      }
+
+      if (!hasStrategy("historical")) {
+        if (traitNotes.length >= 2) {
+          const histFallback = buildTraitTargetRecipe(unlockedNotesList, targetTrait, remaining, 2);
+          addIfUnique(
+            recipeToSuggestion(
+              histFallback.recipe,
+              targetNote,
+              isScoreType,
+              `经典双香：${histFallback.reason}`,
+              "historical"
+            )
+          );
+        } else if (traitNotes.length >= 1) {
+          const altNote = unlockedNotesList.find((n) => n.id !== traitNotes[0].id);
+          if (altNote) {
+            const combo = ensureRecipeValid([
+              { note: traitNotes[0], drops: Math.max(MIN_DROPS_PER_NOTE, 4) },
+              { note: altNote, drops: Math.max(MIN_DROPS_PER_NOTE, 3) }
+            ]);
+            addIfUnique(
+              recipeToSuggestion(
+                combo,
+                targetNote,
+                isScoreType,
+                `经典组合：「${traitNotes[0].name}」+「${altNote.name}」`,
+                "historical"
+              )
+            );
+          }
+        }
+      }
+
+      if (traitNotes.length >= 1) {
+        const topNote = traitNotes[0];
+        const dropsNeeded = Math.min(
+          MAX_DROPS_PER_NOTE,
+          Math.max(MIN_TOTAL_DROPS, Math.ceil(remaining / Math.max(1, topNote.traits[targetTrait])) + 2)
+        );
+        addIfUnique(
+          recipeToSuggestion(
+            [{ note: topNote, drops: dropsNeeded }],
+            targetNote,
+            isScoreType,
+            `极致单香：「${topNote.name}」${dropsNeeded} 滴，最大化${traitLabels[targetTrait]}`,
+            "extreme"
+          )
+        );
+      }
+
+      if (!hasStrategy("extreme") && traitNotes.length >= 2) {
+        const extreme = buildTraitTargetRecipe(unlockedNotesList, targetTrait, remaining, 3);
+        addIfUnique(
+          recipeToSuggestion(extreme.recipe, targetNote, isScoreType, `极致复配：${extreme.reason}`, "extreme")
+        );
+      }
     }
   } else if (isScoreType) {
     const existingTotal = existingNotes.reduce((s, e) => s + e.drops, 0);
 
     const incrementalRecipe = (() => {
-      if (existingNotes.length === 0) return null;
+      if (existingNotes.length === 0) {
+        const fallback = buildScoreTargetRecipe(unlockedNotesList, "balanced");
+        return {
+          recipe: fallback.recipe,
+          traits: computeTraitsFromSelected(
+            fallback.recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+          ),
+          total: fallback.recipe.reduce((s, r) => s + r.drops, 0),
+          reason: `推荐起点：${fallback.reason}`
+        };
+      }
+
       if (!needMore && currentValue >= targetValue) {
         const traits = computeTraitsFromSelected(
           existingNotes.map((e) => ({ noteId: e.note.id, drops: e.drops }))
@@ -1318,18 +1619,14 @@ function suggestUnlockRecipes(
       const availableDrops = MAX_TOTAL_DROPS - existingTotal;
 
       if (availableSlots <= 0 || availableDrops <= 0) {
-        if (existingNotes.length >= 3) {
-          const traits = computeTraitsFromSelected(
-            existingNotes.map((e) => ({ noteId: e.note.id, drops: e.drops }))
-          );
-          return {
-            recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
-            traits,
-            total: existingTotal,
-            reason: `维持当前多香调配方，尝试封瓶获取评分`
-          };
-        }
-        return null;
+        return {
+          recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+          traits: currentTraitsBase,
+          total: existingTotal,
+          reason: existingNotes.length >= 3
+            ? `维持当前多香调配方，尝试封瓶获取评分`
+            : `当前配方已满，尝试封瓶`
+        };
       }
 
       const traitCoverage: Record<Trait, boolean> = { fresh: false, sweet: false, wood: false, spice: false };
@@ -1350,33 +1647,40 @@ function suggestUnlockRecipes(
           return Math.max(...Object.values(b.traits)) - Math.max(...Object.values(a.traits));
         });
 
-      if (candidates.length === 0) return null;
+      if (candidates.length > 0) {
+        const toAdd = candidates.slice(0, Math.min(availableSlots, missingTraits.length, 2));
+        const dropsPerNew = Math.min(
+          MAX_DROPS_PER_NOTE,
+          Math.max(MIN_DROPS_PER_NOTE, Math.floor(availableDrops / toAdd.length))
+        );
+        const recipe = [
+          ...existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+          ...toAdd.map((n) => ({ note: n, drops: dropsPerNew }))
+        ];
+        const total = recipe.reduce((s, r) => s + r.drops, 0);
+        const traits = computeTraitsFromSelected(
+          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        );
+        return {
+          recipe,
+          traits,
+          total,
+          reason: `补充${toAdd.map((n) => `「${n.name}」`).join("")}，补齐气味维度提升评分`
+        };
+      }
 
-      const toAdd = candidates.slice(0, Math.min(availableSlots, missingTraits.length, 2));
-      const dropsPerNew = Math.min(
-        MAX_DROPS_PER_NOTE,
-        Math.max(MIN_DROPS_PER_NOTE, Math.floor(availableDrops / toAdd.length))
-      );
-      const recipe = [
-        ...existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
-        ...toAdd.map((n) => ({ note: n, drops: dropsPerNew }))
-      ];
-      const total = recipe.reduce((s, r) => s + r.drops, 0);
-      const traits = computeTraitsFromSelected(
-        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-      );
       return {
-        recipe,
-        traits,
-        total,
-        reason: `补充${toAdd.map((n) => `「${n.name}」`).join("")}，补齐气味维度提升评分`
+        recipe: existingNotes.map((e) => ({ note: e.note, drops: e.drops })),
+        traits: currentTraitsBase,
+        total: existingTotal,
+        reason: `维持当前配方，尝试封瓶`
       };
     })();
 
     if (incrementalRecipe) {
-      suggestions.push({
+      addIfUnique({
         targetNote,
-        recipe: incrementalRecipe.recipe,
+        recipe: ensureRecipeValid(incrementalRecipe.recipe),
         estimatedTraits: incrementalRecipe.traits,
         estimatedScore: estimateScoreFromTraitsAndNotes(
           incrementalRecipe.traits,
@@ -1391,101 +1695,161 @@ function suggestUnlockRecipes(
     }
 
     const bestHistorical = findBestHistoricalCreation(targetNote, history, unlockedNoteIds);
-    if (bestHistorical && bestHistorical.score >= targetValue * 0.8) {
+    if (bestHistorical && bestHistorical.score >= Math.max(60, targetValue * 0.5)) {
       const histRecipe = buildRecipeFromCreation(bestHistorical, unlockedNoteIds);
       if (histRecipe && histRecipe.length >= 2) {
-        const traits = computeTraitsFromSelected(
-          histRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        addIfUnique(
+          recipeToSuggestion(
+            histRecipe,
+            targetNote,
+            isScoreType,
+            `参考历史高分「${bestHistorical.name}」(${bestHistorical.score}分)，稳定路线`,
+            "historical"
+          )
         );
-        const total = histRecipe.reduce((s, r) => s + r.drops, 0);
-        suggestions.push({
-          targetNote,
-          recipe: histRecipe,
-          estimatedTraits: traits,
-          estimatedScore: estimateScoreFromTraitsAndNotes(
-            traits,
-            histRecipe.length,
-            total,
-            histRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-          ),
-          reason: `参考历史高分「${bestHistorical.name}」(${bestHistorical.score}分)，稳定路线`,
-          isScoreType,
-          strategy: "historical"
-        });
       }
     }
 
-    const diversified = (() => {
-      const byTrait: Record<Trait, Note[]> = { fresh: [], sweet: [], wood: [], spice: [] };
-      unlockedNotesList.forEach((n) => {
-        (Object.keys(byTrait) as Trait[]).forEach((t) => {
-          if (n.traits[t] >= 2) byTrait[t].push(n);
-        });
-      });
-      const picks: Note[] = [];
-      (Object.keys(byTrait) as Trait[]).forEach((t) => {
-        if (byTrait[t].length > 0 && picks.length < MAX_NOTES) {
-          picks.push(byTrait[t][0]);
-        }
-      });
-      if (picks.length < 3 && unlockedNotesList.length >= 3) {
-        return unlockedNotesList.slice(0, Math.min(MAX_NOTES, 4));
-      }
-      return picks.slice(0, MAX_NOTES);
-    })();
-
-    if (diversified.length >= 3) {
-      const recipe = diversified.map((n) => ({
-        note: n,
-        drops: Math.min(
-          MAX_DROPS_PER_NOTE,
-          Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / diversified.length))
+    if (!hasStrategy("historical")) {
+      const histFallback = buildScoreTargetRecipe(unlockedNotesList, "trait-focused");
+      addIfUnique(
+        recipeToSuggestion(
+          histFallback.recipe,
+          targetNote,
+          isScoreType,
+          `经典组合：${histFallback.reason}`,
+          "historical"
         )
-      }));
-      const total = recipe.reduce((s, r) => s + r.drops, 0);
-      const traits = computeTraitsFromSelected(
-        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
       );
-      suggestions.push({
-        targetNote,
-        recipe,
-        estimatedTraits: traits,
-        estimatedScore: estimateScoreFromTraitsAndNotes(
-          traits,
-          recipe.length,
-          total,
-          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-        ),
-        reason: `四维度全覆盖配方，追求极限高分（${diversified.length}种香调）`,
-        isScoreType,
-        strategy: "extreme"
-      });
+    }
+
+    const extreme = buildScoreTargetRecipe(unlockedNotesList, "max-diversity");
+    if (extreme.recipe.length >= 2) {
+      addIfUnique(
+        recipeToSuggestion(
+          extreme.recipe,
+          targetNote,
+          isScoreType,
+          `极致路线：${extreme.reason}`,
+          "extreme"
+        )
+      );
+    }
+
+    if (!hasStrategy("extreme")) {
+      const balanced = buildScoreTargetRecipe(unlockedNotesList, "balanced");
+      addIfUnique(
+        recipeToSuggestion(
+          balanced.recipe,
+          targetNote,
+          isScoreType,
+          `均衡路线：${balanced.reason}`,
+          "extreme"
+        )
+      );
     }
   }
 
   if (suggestions.length === 0 && unlockedNotesList.length > 0) {
-    const fallbackRecipe = unlockedNotesList.slice(0, Math.min(3, MAX_NOTES)).map((n) => ({
-      note: n,
-      drops: Math.min(MAX_DROPS_PER_NOTE, Math.max(MIN_TOTAL_DROPS, 3))
-    }));
-    const total = fallbackRecipe.reduce((s, r) => s + r.drops, 0);
-    const traits = computeTraitsFromSelected(
-      fallbackRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+    const defaultRecipe = ensureRecipeValid(
+      unlockedNotesList.slice(0, Math.min(2, MAX_NOTES)).map((n) => ({
+        note: n,
+        drops: Math.max(MIN_DROPS_PER_NOTE, 4)
+      }))
     );
-    suggestions.push({
-      targetNote,
-      recipe: fallbackRecipe,
-      estimatedTraits: traits,
-      estimatedScore: estimateScoreFromTraitsAndNotes(
-        traits,
-        fallbackRecipe.length,
-        total,
-        fallbackRecipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
-      ),
-      reason: `基础尝试配方`,
-      isScoreType,
-      strategy: "incremental"
-    });
+    addIfUnique(
+      recipeToSuggestion(defaultRecipe, targetNote, isScoreType, `基础尝试配方`, "incremental")
+    );
+  }
+
+  const strategiesNeeded: ("incremental" | "historical" | "extreme")[] = [
+    "incremental",
+    "historical",
+    "extreme"
+  ];
+
+  for (const strategy of strategiesNeeded) {
+    if (suggestions.length >= suggestionCount) break;
+    if (hasStrategy(strategy)) continue;
+
+    if (!isScoreType && targetNote.unlockCondition?.trait) {
+      const targetTrait = targetNote.unlockCondition.trait;
+      const noteCount = strategy === "extreme" ? 1 : strategy === "historical" ? 2 : 2;
+      const fallback = buildTraitTargetRecipe(unlockedNotesList, targetTrait, remaining, noteCount);
+      addIfUnique(
+        recipeToSuggestion(fallback.recipe, targetNote, isScoreType, fallback.reason, strategy)
+      );
+    } else if (isScoreType) {
+      const strat = strategy === "incremental" ? "balanced" : strategy === "historical" ? "trait-focused" : "max-diversity";
+      const fallback = buildScoreTargetRecipe(unlockedNotesList, strat);
+      addIfUnique(
+        recipeToSuggestion(fallback.recipe, targetNote, isScoreType, fallback.reason, strategy)
+      );
+    }
+  }
+
+  let variantCounter = 0;
+  while (suggestions.length < suggestionCount && variantCounter < 10) {
+    variantCounter++;
+    if (!isScoreType && targetNote.unlockCondition?.trait) {
+      const targetTrait = targetNote.unlockCondition.trait;
+      const altCount = 2 + (variantCounter % 2);
+      const variant = buildTraitTargetRecipe(unlockedNotesList, targetTrait, remaining + variantCounter, altCount);
+      const success = addIfUnique(
+        recipeToSuggestion(
+          variant.recipe,
+          targetNote,
+          isScoreType,
+          `变体${variantCounter}：${variant.reason}`,
+          variantCounter % 2 === 0 ? "historical" : "extreme"
+        )
+      );
+      if (!success && unlockedNotesList.length > 0) {
+        const altNote = unlockedNotesList[variantCounter % unlockedNotesList.length];
+        const recipe = ensureRecipeValid([{ note: altNote, drops: MIN_TOTAL_DROPS }]);
+        addIfUnique(
+          recipeToSuggestion(
+            recipe,
+            targetNote,
+            isScoreType,
+            `变体${variantCounter}：单香「${altNote.name}」尝试`,
+            "extreme"
+          )
+        );
+      }
+    } else if (isScoreType) {
+      const strategies: Array<"balanced" | "trait-focused" | "max-diversity"> = ["balanced", "trait-focused", "max-diversity"];
+      const strat = strategies[variantCounter % strategies.length];
+      const variant = buildScoreTargetRecipe(unlockedNotesList, strat);
+      const success = addIfUnique(
+        recipeToSuggestion(
+          variant.recipe,
+          targetNote,
+          isScoreType,
+          `变体${variantCounter}：${variant.reason}`,
+          variantCounter % 2 === 0 ? "historical" : "extreme"
+        )
+      );
+      if (!success && unlockedNotesList.length >= 2) {
+        const idx1 = variantCounter % unlockedNotesList.length;
+        const idx2 = (variantCounter + 1) % unlockedNotesList.length;
+        if (idx1 !== idx2) {
+          const recipe = ensureRecipeValid([
+            { note: unlockedNotesList[idx1], drops: 4 },
+            { note: unlockedNotesList[idx2], drops: 3 }
+          ]);
+          addIfUnique(
+            recipeToSuggestion(
+              recipe,
+              targetNote,
+              isScoreType,
+              `变体${variantCounter}：「${unlockedNotesList[idx1].name}」+「${unlockedNotesList[idx2].name}」`,
+              "historical"
+            )
+          );
+        }
+      }
+    }
   }
 
   return suggestions.slice(0, suggestionCount);

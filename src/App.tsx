@@ -236,6 +236,49 @@ const notes: Note[] = [
 ];
 
 const noteStorageKey = "hxwl-1-unlocked-notes";
+const draftStorageKey = "hxwl-1-draft";
+
+type DraftData = {
+  selectedNotes: SelectedNote[];
+  customName: string;
+  replicateSourceId?: string;
+  replicateSourceName?: string;
+};
+
+function loadDraft(): DraftData | null {
+  try {
+    const raw = localStorage.getItem(draftStorageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed.selectedNotes)) {
+        return parsed as DraftData;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveDraft(data: DraftData) {
+  try {
+    if (data.selectedNotes.length === 0) {
+      localStorage.removeItem(draftStorageKey);
+    } else {
+      localStorage.setItem(draftStorageKey, JSON.stringify(data));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(draftStorageKey);
+  } catch {
+    // ignore
+  }
+}
 
 function getNoteById(id: string): Note | undefined {
   return notes.find((n) => n.id === id);
@@ -569,7 +612,16 @@ function recommendNotes(quizTraits: Record<Trait, number>, unlockedIds: string[]
 }
 
 export default function App() {
-  const [selectedNotes, setSelectedNotes] = useState<SelectedNote[]>([]);
+  const [selectedNotes, setSelectedNotes] = useState<SelectedNote[]>(() => {
+    const draft = loadDraft();
+    if (draft && draft.selectedNotes.length > 0) {
+      const valid = draft.selectedNotes.filter(
+        (s) => typeof s.noteId === "string" && typeof s.drops === "number" && getNoteById(s.noteId)
+      );
+      if (valid.length > 0) return valid;
+    }
+    return [];
+  });
   const [history, setHistory] = useState<Creation[]>(loadHistory);
   const [historyNameFilter, setHistoryNameFilter] = useState("");
   const [historyNoteFilter, setHistoryNoteFilter] = useState("");
@@ -579,7 +631,10 @@ export default function App() {
   const [historySort, setHistorySort] = useState<HistorySortOption>("created-desc");
   const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
   const [activeNote, setActiveNote] = useState<Note | null>(null);
-  const [customName, setCustomName] = useState<string>("");
+  const [customName, setCustomName] = useState<string>(() => {
+    const draft = loadDraft();
+    return draft?.customName || "";
+  });
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [pendingCustomName, setPendingCustomName] = useState<string>("");
   const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
@@ -594,7 +649,21 @@ export default function App() {
   const [newlyUnlocked, setNewlyUnlocked] = useState<Note[]>([]);
   const [unlockNotificationOpen, setUnlockNotificationOpen] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(false);
-  const [replicateSource, setReplicateSource] = useState<Creation | null>(null);
+  const [replicateSource, setReplicateSource] = useState<Creation | null>(() => {
+    const draft = loadDraft();
+    if (draft?.replicateSourceId && draft?.replicateSourceName) {
+      return {
+        id: draft.replicateSourceId,
+        name: draft.replicateSourceName,
+        originalName: draft.replicateSourceName,
+        score: 0,
+        description: "",
+        notes: [],
+        createdAt: new Date().toISOString()
+      } as Creation;
+    }
+    return null;
+  });
   const [replicateNotificationOpen, setReplicateNotificationOpen] = useState(false);
   const [replicateResult, setReplicateResult] = useState<ReplicateResult | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -603,6 +672,7 @@ export default function App() {
   const [calendarSelectedDay, setCalendarSelectedDay] = useState<number | null>(null);
   const [importNotificationOpen, setImportNotificationOpen] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [draftBannerVisible, setDraftBannerVisible] = useState<boolean>(() => loadDraft() !== null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -630,6 +700,19 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedNotes.length > 0) {
+      saveDraft({
+        selectedNotes,
+        customName,
+        replicateSourceId: replicateSource?.id,
+        replicateSourceName: replicateSource?.name
+      });
+    } else {
+      clearDraft();
+    }
+  }, [selectedNotes, customName, replicateSource]);
 
   const unlockedNotes = useMemo(
     () => notes.filter((note) => unlockedNoteIds.includes(note.id)),
@@ -842,6 +925,7 @@ export default function App() {
       setUnlockNotificationOpen(true);
     }
 
+    clearDraft();
     setSelectedNotes([]);
     setCustomName("");
     setPendingCustomName("");
@@ -1143,6 +1227,7 @@ export default function App() {
         <button
           className="ghost-button"
           onClick={() => {
+            clearDraft();
             setSelectedNotes([]);
             setCustomName("");
             setPendingCustomName("");
@@ -1255,6 +1340,17 @@ export default function App() {
 
         <div className="panel lab-panel">
           <h2>调香台</h2>
+          {draftBannerVisible && selectedNotes.length > 0 && (
+            <div className="draft-banner">
+              <span className="draft-banner-text">已恢复上次未封瓶的草稿</span>
+              <button
+                className="draft-banner-close"
+                onClick={() => setDraftBannerVisible(false)}
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="lab-mode-header">
             <span className={`lab-mode-badge ${totalDrops > 0 ? "active" : ""}`}>
               配方实验室模式

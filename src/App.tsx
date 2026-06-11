@@ -1085,12 +1085,11 @@ export default function App() {
       3
     );
 
-    const newRecs = recommendations.filter((r) => !existingIds.has(r.note.id));
-    const toAdd = newRecs.slice(0, slotsRemaining);
-
     const existingTotal = existingSelected.reduce((s, i) => s + i.drops, 0);
+    const availableDrops = MAX_TOTAL_DROPS - existingTotal;
+    const newRecs = recommendations.filter((r) => !existingIds.has(r.note.id));
+    const toAdd = newRecs.slice(0, Math.min(slotsRemaining, Math.max(0, availableDrops)));
     const recTotalRaw = toAdd.reduce((s, r) => s + r.recommendedDrops, 0);
-    const combinedTotalRaw = existingTotal + recTotalRaw;
 
     let finalNewItems: SelectedNote[] = [];
 
@@ -1106,7 +1105,7 @@ export default function App() {
         Math.min(MAX_DROPS_PER_NOTE, toAdd[0].recommendedDrops)
       );
       finalNewItems = [{ noteId: toAdd[0].note.id, drops: d }];
-    } else if (combinedTotalRaw < MIN_TOTAL_DROPS && existingSelected.length === 0) {
+    } else if (recTotalRaw < MIN_TOTAL_DROPS && existingSelected.length === 0) {
       const scaleUp = MIN_TOTAL_DROPS / recTotalRaw;
       let scaled = toAdd.map((r) => ({
         noteId: r.note.id,
@@ -1126,11 +1125,8 @@ export default function App() {
         noteId: s.noteId,
         drops: Math.min(MAX_DROPS_PER_NOTE, s.drops)
       }));
-    } else if (combinedTotalRaw > MAX_TOTAL_DROPS) {
-      const allowedForNew = Math.max(
-        toAdd.length * MIN_DROPS_PER_NOTE,
-        MAX_TOTAL_DROPS - existingTotal
-      );
+    } else if (recTotalRaw > availableDrops) {
+      const allowedForNew = availableDrops;
       const scaleDown = allowedForNew / recTotalRaw;
       let scaled = toAdd.map((r) => ({
         noteId: r.note.id,
@@ -1157,18 +1153,7 @@ export default function App() {
       }));
     }
 
-    const existingAfterClamp = existingSelected.map((s, i) => {
-      const others = [...existingSelected.slice(0, i), ...existingSelected.slice(i + 1), ...finalNewItems];
-      const otherTotal = others.reduce((sum, o) => sum + o.drops, 0);
-      const maxForItem = Math.max(MIN_DROPS_PER_NOTE, MAX_TOTAL_DROPS - otherTotal);
-      const effectiveMin = existingSelected.length === 1 && finalNewItems.length === 0 ? MIN_TOTAL_DROPS : MIN_DROPS_PER_NOTE;
-      return {
-        ...s,
-        drops: Math.max(effectiveMin, Math.min(MAX_DROPS_PER_NOTE, Math.min(s.drops, maxForItem)))
-      };
-    });
-
-    setSelectedNotes([...existingAfterClamp, ...finalNewItems]);
+    setSelectedNotes([...existingSelected, ...finalNewItems]);
     setQuizOpen(false);
     resetQuiz();
   }

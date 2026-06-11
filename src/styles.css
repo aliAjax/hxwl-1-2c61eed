@@ -3019,3 +3019,343 @@ meter {
     font-size: 1.4rem;
   }
 }
+
+.progress-toggle-btn.active {
+  background: #f4c95d !important;
+  color: #3a2a08 !important;
+}
+
+.unlock-progress-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(244, 201, 93, 0.08), rgba(120, 198, 163, 0.06));
+  border: 1px solid rgba(244, 201, 93, 0.25);
+  border-radius: 12px;
+  animation: slideDown 0.3s ease;
+}
+
+.unlock-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.unlock-progress-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #7a5a1f;
+  font-weight: 700;
+}
+
+.unlock-progress-subtitle {
+  font-size: 0.8rem;
+  color: #8a7a5a;
+  font-weight: 500;
+}
+
+.unlock-progress-empty {
+  text-align: center;
+  padding: 28px 16px;
+  color: #8a8072;
+}
+
+.unlock-progress-empty-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.unlock-progress-empty p {
+  margin: 0;
+  font-weight: 600;
+  color: #5d5248;
+}
+
+.unlock-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.unlock-progress-item {
+  background: rgba(255, 252, 246, 0.9);
+  border: 1px solid rgba(58, 42, 28, 0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.unlock-progress-item:hover {
+  border-color: rgba(244, 201, 93, 0.5);
+  background: rgba(255, 252, 246, 1);
+}
+
+.unlock-progress-item.selected {
+  border-color: #f4c95d;
+  box-shadow: 0 0 0 2px rgba(244, 201, 93, 0.15);
+  background: #fffdf5;
+}
+
+.unlock-progress-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.unlock-progress-note-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.unlock-progress-note-info > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.unlock-progress-note-info strong {
+  font-size: 0.95rem;
+  color: #1c1a17;
+}
+
+.unlock-progress-note-info small {
+  font-size: 0.78rem;
+  color: #6d6259;
+  line-height: 1.3;
+}
+
+.unlock-progress-remaining {
+  flex-shrink: 0;
+}
+
+.remaining-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 4px 10px;
+  background: rgba(217, 108, 99, 0.1);
+  border: 1px solid rgba(217, 108, 99, 0.3);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #b8564d;
+  white-space: nowrap;
+}
+
+.remaining-badge b {
+  font-size: 0.95rem;
+}
+
+.ready-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: linear-gradient(135deg, rgba(120, 198, 163, 0.2), rgba(120, 198, 163, 0.1));
+  border: 1px solid rgba(120, 198, 163, 0.4);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #2d7a5c;
+  white-space: nowrap;
+}
+
+.unlock-progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(58, 42, 28, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.unlock-progress-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+.unlock-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.progress-value {
+  font-size: 0.82rem;
+  color: #5d5248;
+  font-weight: 500;
+}
+
+.progress-value b {
+  color: #1c1a17;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.progress-source {
+  font-size: 0.75rem;
+  color: #8a8072;
+  font-style: italic;
+}
+
+.unlock-recipe-suggestions {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(244, 201, 93, 0.4);
+  animation: fadeInItem 0.25s ease;
+}
+
+.recipe-suggestions-header {
+  margin-bottom: 10px;
+}
+
+.recipe-suggestions-header h4 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #7a5a1f;
+  font-weight: 700;
+}
+
+.recipe-suggestions-empty {
+  margin: 0;
+  padding: 12px;
+  font-size: 0.85rem;
+  color: #8a8072;
+  text-align: center;
+  background: rgba(58, 42, 28, 0.04);
+  border-radius: 8px;
+}
+
+.recipe-suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recipe-suggestion-card {
+  background: rgba(255, 252, 246, 0.95);
+  border: 1px solid rgba(58, 42, 28, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.recipe-suggestion-reason {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5d4210;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: rgba(244, 201, 93, 0.1);
+  border-radius: 6px;
+}
+
+.recipe-suggestion-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.recipe-note-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #eadfd2;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3f342b;
+}
+
+.recipe-suggestion-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: rgba(58, 42, 28, 0.04);
+  border-radius: 8px;
+}
+
+.recipe-stat {
+  font-size: 0.8rem;
+  color: #5d5248;
+  font-weight: 500;
+}
+
+.recipe-stat b {
+  color: #1c1a17;
+  font-weight: 700;
+}
+
+.recipe-stat.recipe-score {
+  color: #2d7a5c;
+}
+
+.recipe-stat.recipe-score b {
+  color: #1c5a40;
+}
+
+.apply-recipe-btn {
+  width: 100%;
+  padding: 10px 14px !important;
+  font-size: 0.88rem !important;
+  background: linear-gradient(135deg, #78c6a3, #5ea98a) !important;
+}
+
+.apply-recipe-btn:disabled {
+  background: #d4cfc6 !important;
+  color: #8a8072 !important;
+  cursor: not-allowed !important;
+}
+
+@media (max-width: 560px) {
+  .unlock-progress-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .unlock-progress-item-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .unlock-progress-remaining {
+    align-self: flex-start;
+  }
+
+  .unlock-progress-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .recipe-suggestion-stats {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .note-stats {
+    flex-wrap: wrap;
+  }
+
+  .progress-toggle-btn {
+    flex: 1;
+    text-align: center;
+  }
+}

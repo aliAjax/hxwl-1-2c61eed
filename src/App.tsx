@@ -575,6 +575,26 @@ type RecommendedNote = {
   recommendedDrops: number;
 };
 
+type NoteUnlockProgress = {
+  note: Note;
+  currentValue: number;
+  targetValue: number;
+  remaining: number;
+  progressPercent: number;
+  isScoreType: boolean;
+  source: "history" | "current" | "both";
+  sourceDetail: string;
+};
+
+type UnlockRecipeSuggestion = {
+  targetNote: Note;
+  recipe: { note: Note; drops: number }[];
+  estimatedTraits: Record<Trait, number>;
+  estimatedScore: number;
+  reason: string;
+  isScoreType: boolean;
+};
+
 const quizQuestions: QuizQuestion[] = [
   {
     question: "今天想要什么样的感觉？",
@@ -661,6 +681,275 @@ function recommendNotes(
   });
 }
 
+function getCreationEffectiveTraits(creation: Creation): Record<Trait, number> | null {
+  if (creation.traits && Object.values(creation.traits).some((v) => v > 0)) {
+    return creation.traits;
+  }
+  const noteIds = resolveCreationNoteIdsLegacy(creation.notes || []);
+  if (noteIds.length === 0) return null;
+  const dropsMap = creation.noteDrops && Object.keys(creation.noteDrops).length > 0
+    ? creation.noteDrops
+    : null;
+  return noteIds.reduce(
+    (total, noteId) => {
+      const note = getNoteById(noteId);
+      if (note) {
+        const drops = dropsMap
+          ? (dropsMap[noteId] || dropsMap[note.name] || DEFAULT_DROPS)
+          : DEFAULT_DROPS;
+        (Object.keys(total) as Trait[]).forEach((trait) => {
+          total[trait] += note.traits[trait] * drops;
+        });
+      }
+      return total;
+    },
+    { fresh: 0, sweet: 0, wood: 0, spice: 0 }
+  );
+}
+
+function computeNoteUnlockProgress(
+  note: Note,
+  history: Creation[],
+  currentTraits: Record<Trait, number>,
+  currentScore: number
+): NoteUnlockProgress | null {
+  if (note.isBasic || !note.unlockCondition) return null;
+
+  const { type, trait, minValue, minScore } = note.unlockCondition;
+  const isScoreType = type === "score";
+
+  let historyBest = 0;
+  let historySource = "";
+  for (const creation of history) {
+    if (isScoreType) {
+      if (creation.score > historyBest) {
+        historyBest = creation.score;
+        historySource = creation.name;
+      }
+    } else if (trait) {
+      const effTraits = getCreationEffectiveTraits(creation);
+      if (effTraits && effTraits[trait] > historyBest) {
+        historyBest = effTraits[trait];
+        historySource = creation.name;
+      }
+    }
+  }
+
+  const currentVal = isScoreType ? currentScore : (trait ? currentTraits[trait] : 0);
+
+  const targetValue = isScoreType ? (minScore ?? 0) : (minValue ?? 0);
+  const currentValue = Math.max(historyBest, currentVal);
+  const remaining = Math.max(0, targetValue - currentValue);
+  const progressPercent = Math.min(100, (currentValue / targetValue) * 100);
+
+  let source: "history" | "current" | "both" = "history";
+  let sourceDetail = "";
+  if (historyBest > 0 && currentVal > 0 && historyBest !== currentVal) {
+    source = "both";
+    sourceDetail = `历史最佳「${historySource}」${historyBest}，调香台当前 ${currentVal}`;
+  } else if (currentVal > historyBest) {
+    source = "current";
+    sourceDetail = `调香台当前 ${currentVal}`;
+  } else if (historyBest > 0) {
+    source = "history";
+    sourceDetail = `历史最佳「${historySource}」${historyBest}`;
+  } else {
+    source = "history";
+    sourceDetail = "暂无记录";
+  }
+
+  return {
+    note,
+    currentValue,
+    targetValue,
+    remaining,
+    progressPercent,
+    isScoreType,
+    source,
+    sourceDetail
+  };
+}
+
+function getAllUnlockProgress(
+  history: Creation[],
+  currentTraits: Record<Trait, number>,
+  currentScore: number,
+  unlockedNoteIds: string[]
+): NoteUnlockProgress[] {
+  return notes
+    .filter((n) => !unlockedNoteIds.includes(n.id) && !n.isBasic)
+    .map((n) => computeNoteUnlockProgress(n, history, currentTraits, currentScore))
+    .filter((p): p is NoteUnlockProgress => p !== null)
+    .sort((a, b) => a.remaining - b.remaining);
+}
+
+function estimateScoreFromTraitsAndNotes(
+  traits: Record<Trait, number>,
+  noteCount: number,
+  totalDrops: number
+): number {
+  const maxTraitValue = Math.max(...Object.values(traits));
+  const dropDiversityBonus = noteCount >= 4 ? 8 : noteCount >= 3 ? 5 : noteCount >= 2 ? 3 : 0;
+  const concentrationBonus = Math.min(totalDrops * 1.2, 18);
+  const balancedTraits = Object.values(traits).filter(
+    (value) => value >= Math.max(...Object.values(traits)) * 0.4
+  ).length;
+  const balanceBonus = balancedTraits * 4;
+  return Math.min(98, Math.round(40 + dropDiversityBonus + concentrationBonus + balanceBonus + Math.min(maxTraitValue, 20)));
+}
+
+function suggestUnlockRecipes(
+  targetProgress: NoteUnlockProgress,
+  unlockedNoteIds: string[],
+  suggestionCount: number = 2
+): UnlockRecipeSuggestion[] {
+  const { note: targetNote, isScoreType, remaining } = targetProgress;
+  const unlockedNotesList = notes.filter((n) => unlockedNoteIds.includes(n.id));
+  const suggestions: UnlockRecipeSuggestion[] = [];
+
+  if (unlockedNotesList.length === 0) return suggestions;
+
+  if (!isScoreType && targetNote.unlockCondition?.trait) {
+    const targetTrait = targetNote.unlockCondition.trait;
+    const traitNotes = unlockedNotesList
+      .filter((n) => n.traits[targetTrait] > 0)
+      .sort((a, b) => b.traits[targetTrait] - a.traits[targetTrait]);
+
+    if (traitNotes.length === 0) return suggestions;
+
+    const strategy1 = (() => {
+      const topNote = traitNotes[0];
+      const dropsNeeded = Math.min(
+        MAX_DROPS_PER_NOTE,
+        Math.max(MIN_TOTAL_DROPS, Math.ceil(remaining / topNote.traits[targetTrait]) + 1)
+      );
+      const recipe = [{ note: topNote, drops: dropsNeeded }];
+      const traits = computeTraitsFromSelected(
+        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+      );
+      return {
+        targetNote,
+        recipe,
+        estimatedTraits: traits,
+        estimatedScore: estimateScoreFromTraitsAndNotes(traits, 1, dropsNeeded),
+        reason: `主打「${topNote.name}」${dropsNeeded} 滴，单香调突破`,
+        isScoreType
+      };
+    })();
+    suggestions.push(strategy1);
+
+    if (traitNotes.length >= 2) {
+      const strategy2 = (() => {
+        const top2 = traitNotes.slice(0, 2);
+        const totalTraitPerDrop = top2.reduce((s, n) => s + n.traits[targetTrait], 0);
+        const baseDropsEach = Math.max(1, Math.ceil(remaining / totalTraitPerDrop));
+        const drops1 = Math.min(MAX_DROPS_PER_NOTE, baseDropsEach + 1);
+        const drops2 = Math.min(MAX_DROPS_PER_NOTE, baseDropsEach);
+        const total = drops1 + drops2;
+        const recipe = [
+          { note: top2[0], drops: drops1 },
+          { note: top2[1], drops: Math.max(MIN_DROPS_PER_NOTE, drops2) }
+        ];
+        const traits = computeTraitsFromSelected(
+          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        );
+        return {
+          targetNote,
+          recipe,
+          estimatedTraits: traits,
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 2, total),
+          reason: `「${top2[0].name}」+「${top2[1].name}」双香调叠加`,
+          isScoreType
+        };
+      })();
+      suggestions.push(strategy2);
+    }
+
+    if (traitNotes.length >= 3) {
+      const strategy3 = (() => {
+        const top3 = traitNotes.slice(0, 3);
+        const recipe = top3.map((n) => ({ note: n, drops: Math.min(MAX_DROPS_PER_NOTE, Math.max(MIN_DROPS_PER_NOTE, Math.ceil(remaining / 4) + 1)) }));
+        const total = recipe.reduce((s, r) => s + r.drops, 0);
+        const traits = computeTraitsFromSelected(
+          recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        );
+        return {
+          targetNote,
+          recipe,
+          estimatedTraits: traits,
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits, 3, total),
+          reason: `三香调复调，平衡+高分`,
+          isScoreType
+        };
+      })();
+      suggestions.push(strategy3);
+    }
+  } else if (isScoreType) {
+    const diversified = (() => {
+      const byTrait: Record<Trait, Note[]> = { fresh: [], sweet: [], wood: [], spice: [] };
+      unlockedNotesList.forEach((n) => {
+        (Object.keys(byTrait) as Trait[]).forEach((t) => {
+          if (n.traits[t] >= 2) byTrait[t].push(n);
+        });
+      });
+      const picks: Note[] = [];
+      (Object.keys(byTrait) as Trait[]).forEach((t) => {
+        if (byTrait[t].length > 0 && picks.length < MAX_NOTES) {
+          picks.push(byTrait[t][0]);
+        }
+      });
+      if (picks.length < 2 && unlockedNotesList.length >= 2) {
+        return unlockedNotesList.slice(0, Math.min(MAX_NOTES, 4));
+      }
+      return picks.slice(0, MAX_NOTES);
+    })();
+
+    if (diversified.length > 0) {
+      const recipe = diversified.map((n) => ({
+        note: n,
+        drops: Math.min(MAX_DROPS_PER_NOTE, Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / diversified.length)))
+      }));
+      const total = recipe.reduce((s, r) => s + r.drops, 0);
+      const traits = computeTraitsFromSelected(
+        recipe.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+      );
+      suggestions.push({
+        targetNote,
+        recipe,
+        estimatedTraits: traits,
+        estimatedScore: estimateScoreFromTraitsAndNotes(traits, recipe.length, total),
+        reason: `多香调平衡配方，冲高分`,
+        isScoreType
+      });
+
+      if (unlockedNotesList.length >= 3) {
+        const topTraitNotes = unlockedNotesList
+          .slice()
+          .sort((a, b) => Math.max(...Object.values(b.traits)) - Math.max(...Object.values(a.traits)))
+          .slice(0, 3);
+        const recipe2 = topTraitNotes.map((n) => ({
+          note: n,
+          drops: Math.min(MAX_DROPS_PER_NOTE, Math.max(MIN_DROPS_PER_NOTE, Math.floor(MAX_TOTAL_DROPS / 3)))
+        }));
+        const total2 = recipe2.reduce((s, r) => s + r.drops, 0);
+        const traits2 = computeTraitsFromSelected(
+          recipe2.map((r) => ({ noteId: r.note.id, drops: r.drops }))
+        );
+        suggestions.push({
+          targetNote,
+          recipe: recipe2,
+          estimatedTraits: traits2,
+          estimatedScore: estimateScoreFromTraitsAndNotes(traits2, 3, total2),
+          reason: `高特质香调组合，最大化浓度分`,
+          isScoreType
+        });
+      }
+    }
+  }
+
+  return suggestions.slice(0, suggestionCount);
+}
+
 export default function App() {
   const [selectedNotes, setSelectedNotes] = useState<SelectedNote[]>(() => {
     const draft = loadDraft();
@@ -724,6 +1013,8 @@ export default function App() {
   const [importNotificationOpen, setImportNotificationOpen] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [draftBannerVisible, setDraftBannerVisible] = useState<boolean>(() => loadDraft() !== null);
+  const [unlockProgressOpen, setUnlockProgressOpen] = useState<boolean>(false);
+  const [selectedProgressNoteId, setSelectedProgressNoteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -854,6 +1145,82 @@ export default function App() {
 
   const current = selectedNotes.length > 0 ? describe(traits, selectedNotes) : null;
   const displayName = customName || (current ? current.name : "");
+
+  const unlockProgressList = useMemo(() => {
+    const currentScore = current ? current.score : 0;
+    return getAllUnlockProgress(history, traits, currentScore, unlockedNoteIds);
+  }, [history, traits, current, unlockedNoteIds]);
+
+  const selectedProgress = useMemo(() => {
+    if (!selectedProgressNoteId) return null;
+    return unlockProgressList.find((p) => p.note.id === selectedProgressNoteId) || null;
+  }, [selectedProgressNoteId, unlockProgressList]);
+
+  const selectedProgressSuggestions = useMemo(() => {
+    if (!selectedProgress) return [];
+    return suggestUnlockRecipes(selectedProgress, unlockedNoteIds, 2);
+  }, [selectedProgress, unlockedNoteIds]);
+
+  function applyRecipeSuggestion(suggestion: UnlockRecipeSuggestion) {
+    const slotsRemaining = MAX_NOTES - selectedNotes.length;
+    if (suggestion.recipe.length > slotsRemaining) {
+      return;
+    }
+    const existingIds = new Set(selectedNotes.map((s) => s.noteId));
+    const newItems = suggestion.recipe
+      .filter((r) => !existingIds.has(r.note.id))
+      .map((r) => ({ noteId: r.note.id, drops: r.drops }));
+    if (newItems.length === 0) return;
+
+    let totalExisting = selectedNotes.reduce((s, i) => s + i.drops, 0);
+    let totalNew = newItems.reduce((s, i) => s + i.drops, 0);
+    let finalItems = [...newItems];
+
+    if (selectedNotes.length === 0 && newItems.length === 1) {
+      finalItems = [{ ...newItems[0], drops: Math.max(MIN_TOTAL_DROPS, newItems[0].drops) }];
+    } else if (totalExisting + totalNew > MAX_TOTAL_DROPS) {
+      const allowed = MAX_TOTAL_DROPS - totalExisting;
+      if (allowed < newItems.length * MIN_DROPS_PER_NOTE) return;
+      let scaled = newItems.map((item) => ({
+        ...item,
+        drops: Math.max(MIN_DROPS_PER_NOTE, Math.round((item.drops / totalNew) * allowed))
+      }));
+      let scaledTotal = scaled.reduce((s, i) => s + i.drops, 0);
+      let idx = 0;
+      while (scaledTotal < allowed && idx < 1000) {
+        const maxIdx = scaled.reduce(
+          (mi, it, i) => (it.drops < scaled[mi].drops ? i : mi),
+          0
+        );
+        if (scaled[maxIdx].drops < MAX_DROPS_PER_NOTE) {
+          scaled[maxIdx].drops += 1;
+          scaledTotal += 1;
+        }
+        idx++;
+      }
+      finalItems = scaled;
+    } else if (selectedNotes.length === 0 && totalNew < MIN_TOTAL_DROPS) {
+      let scaled = [...newItems];
+      let scaledTotal = totalNew;
+      let idx = 0;
+      while (scaledTotal < MIN_TOTAL_DROPS && idx < 1000) {
+        const maxIdx = scaled.reduce(
+          (mi, it, i) => (it.drops < scaled[mi].drops ? i : mi),
+          0
+        );
+        if (scaled[maxIdx].drops < MAX_DROPS_PER_NOTE) {
+          scaled[maxIdx].drops += 1;
+          scaledTotal += 1;
+        }
+        idx++;
+      }
+      finalItems = scaled;
+    }
+
+    setSelectedNotes([...selectedNotes, ...finalItems]);
+    setUnlockProgressOpen(false);
+    setSelectedProgressNoteId(null);
+  }
 
   function openNoteDetail(note: Note) {
     setActiveNote(note);
@@ -1441,6 +1808,14 @@ export default function App() {
               <span className="stat-badge">
                 已解锁 {unlockedNotes.length}/{notes.length}
               </span>
+              {lockedNotes.length > 0 && (
+                <button
+                  className={`ghost-button small progress-toggle-btn ${unlockProgressOpen ? "active" : ""}`}
+                  onClick={() => setUnlockProgressOpen(!unlockProgressOpen)}
+                >
+                  🔓 解锁进度 {unlockProgressOpen ? "收起" : "展开"}
+                </button>
+              )}
               <button
                 className={`ghost-button small toggle-notes-btn ${showAllNotes ? "active" : ""}`}
                 onClick={() => setShowAllNotes(!showAllNotes)}
@@ -1449,6 +1824,155 @@ export default function App() {
               </button>
             </div>
           </div>
+          {unlockProgressOpen && (
+            <div className="unlock-progress-panel">
+              <div className="unlock-progress-header">
+                <h3>未解锁香调进度</h3>
+                <span className="unlock-progress-subtitle">
+                  按距离解锁从近到远排列
+                </span>
+              </div>
+              {unlockProgressList.length === 0 ? (
+                <div className="unlock-progress-empty">
+                  <span className="unlock-progress-empty-icon">✨</span>
+                  <p>所有香调已解锁！</p>
+                </div>
+              ) : (
+                <div className="unlock-progress-list">
+                  {unlockProgressList.map((progress) => (
+                    <div
+                      key={progress.note.id}
+                      className={`unlock-progress-item ${selectedProgressNoteId === progress.note.id ? "selected" : ""}`}
+                      onClick={() => setSelectedProgressNoteId(
+                        selectedProgressNoteId === progress.note.id ? null : progress.note.id
+                      )}
+                    >
+                      <div className="unlock-progress-item-header">
+                        <div className="unlock-progress-note-info">
+                          <span
+                            className="swatch small-swatch"
+                            style={{ background: progress.note.color, opacity: 0.7 }}
+                          />
+                          <div>
+                            <strong>{progress.note.name}</strong>
+                            <small>{progress.note.unlockCondition?.description}</small>
+                          </div>
+                        </div>
+                        <div className="unlock-progress-remaining">
+                          {progress.remaining > 0 ? (
+                            <span className="remaining-badge">
+                              还差 <b>{progress.remaining}</b>
+                              {progress.isScoreType ? " 分" : ` ${traitLabels[progress.note.unlockCondition?.trait ?? "fresh"]}`}
+                            </span>
+                          ) : (
+                            <span className="ready-badge">可解锁！</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="unlock-progress-bar-track">
+                        <div
+                          className="unlock-progress-bar-fill"
+                          style={{
+                            width: `${progress.progressPercent}%`,
+                            background: progress.isScoreType
+                              ? "linear-gradient(90deg, #b77b54, #f4c95d)"
+                              : getTraitColor(progress.note.unlockCondition?.trait ?? "fresh")
+                          }}
+                        />
+                      </div>
+                      <div className="unlock-progress-meta">
+                        <span className="progress-value">
+                          当前：<b>{progress.currentValue}</b> / {progress.targetValue}
+                          {progress.isScoreType ? " 分" : ""}
+                        </span>
+                        <span className="progress-source">
+                          {progress.sourceDetail}
+                        </span>
+                      </div>
+                      {selectedProgressNoteId === progress.note.id && (
+                        <div className="unlock-recipe-suggestions">
+                          <div className="recipe-suggestions-header">
+                            <h4>💡 可尝试的配方方向</h4>
+                          </div>
+                          {selectedProgressSuggestions.length === 0 ? (
+                            <p className="recipe-suggestions-empty">
+                              暂无推荐配方，请先解锁更多基础香调
+                            </p>
+                          ) : (
+                            <div className="recipe-suggestions-list">
+                              {selectedProgressSuggestions.map((suggestion, idx) => {
+                                const totalRecipeDrops = suggestion.recipe.reduce((s, r) => s + r.drops, 0);
+                                const canApply = suggestion.recipe.length <= MAX_NOTES - selectedNotes.length &&
+                                  suggestion.recipe.every(
+                                    (r) => !selectedNotes.some((s) => s.noteId === r.note.id)
+                                  );
+                                return (
+                                  <div key={idx} className="recipe-suggestion-card">
+                                    <div className="recipe-suggestion-reason">
+                                      {suggestion.reason}
+                                    </div>
+                                    <div className="recipe-suggestion-notes">
+                                      {suggestion.recipe.map((r, i) => (
+                                        <span key={i} className="recipe-note-tag">
+                                          <span
+                                            className="swatch small-swatch"
+                                            style={{ background: r.note.color }}
+                                          />
+                                          {r.note.name} × {r.drops}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <div className="recipe-suggestion-stats">
+                                      <span className="recipe-stat">
+                                        总滴数：<b>{totalRecipeDrops}</b>
+                                      </span>
+                                      {!suggestion.isScoreType && suggestion.targetNote.unlockCondition?.trait && (
+                                        <span
+                                          className="recipe-stat"
+                                          style={{ color: getTraitColor(suggestion.targetNote.unlockCondition.trait) }}
+                                        >
+                                          {traitLabels[suggestion.targetNote.unlockCondition.trait]}：
+                                          <b>{suggestion.estimatedTraits[suggestion.targetNote.unlockCondition.trait]}</b>
+                                        </span>
+                                      )}
+                                      <span className="recipe-stat recipe-score">
+                                        预估评分：<b>{suggestion.estimatedScore}</b> 分
+                                      </span>
+                                    </div>
+                                    <button
+                                      className="primary-button small apply-recipe-btn"
+                                      disabled={!canApply}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        applyRecipeSuggestion(suggestion);
+                                      }}
+                                      title={
+                                        !canApply
+                                          ? (suggestion.recipe.length > MAX_NOTES - selectedNotes.length
+                                            ? "调香台位置不足"
+                                            : "部分香调已在调香台")
+                                          : "一键放入调香台"
+                                      }
+                                    >
+                                      {canApply
+                                        ? "✓ 放入调香台"
+                                        : suggestion.recipe.length > MAX_NOTES - selectedNotes.length
+                                        ? "位置不足"
+                                        : "香调已存在"}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="note-grid">
             {displayNotes.map((note) => {
               const unlocked = unlockedNoteIds.includes(note.id);

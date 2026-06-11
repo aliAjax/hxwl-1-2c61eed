@@ -2439,14 +2439,12 @@ export default function App() {
     if (!isValidForBottling) return;
 
     const safeVersionNote = versionNote.trim() || undefined;
-    const recipeId = editingSource?.recipeId || crypto.randomUUID();
-    const baseVersion = editingSource?.version || 0;
-    const nextVersion = baseVersion + 1;
+    const recipeId = crypto.randomUUID();
 
     const { creation, newlyUnlockedNotes } = buildCurrentCreation({
       recipeId,
-      version: nextVersion,
-      parentVersionId: editingSource?.id,
+      version: 1,
+      parentVersionId: undefined,
       versionNote: safeVersionNote
     });
 

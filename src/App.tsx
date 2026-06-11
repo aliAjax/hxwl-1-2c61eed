@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Note = {
   id: string;
@@ -46,6 +46,13 @@ type ReplicateResult = {
   missingUnknownNotes: string[];
   originalNoteCount: number;
   restoredTraits: Record<Trait, number>;
+};
+
+type ImportResult = {
+  success: Creation[];
+  skipped: { creation: Partial<Creation> & { id?: string }; reason: string }[];
+  successCount: number;
+  skippedCount: number;
 };
 
 const storageKey = "hxwl-1-creations";
@@ -584,6 +591,9 @@ export default function App() {
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
   const [calendarSelectedDay, setCalendarSelectedDay] = useState<number | null>(null);
+  const [importNotificationOpen, setImportNotificationOpen] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const syncHistory = () => {
@@ -876,13 +886,18 @@ export default function App() {
     }
     setHistory(storedCreations);
     const exportData = storedCreations.map((creation) => ({
+      id: creation.id,
       name: creation.name,
+      originalName: creation.originalName,
       score: creation.score,
       description: creation.description,
       notes: creation.notes,
-      noteDrops: getCreationNoteDrops(creation),
+      noteDrops: creation.noteDrops,
       traits: creation.traits,
-      createdAt: creation.createdAt
+      createdAt: creation.createdAt,
+      sourceCreationId: creation.sourceCreationId,
+      sourceCreationName: creation.sourceCreationName,
+      isReplicate: creation.isReplicate
     }));
     const jsonData = JSON.stringify(exportData, null, 2);
     const blob = new Blob([jsonData], { type: "application/json" });
@@ -895,6 +910,124 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  function parseImportData(rawData: unknown): ImportResult {
+    const result: ImportResult = {
+      success: [],
+      skipped: [],
+      successCount: 0,
+      skippedCount: 0
+    };
+
+    let items: unknown[] = [];
+    if (Array.isArray(rawData)) {
+      items = rawData;
+    } else if (rawData && typeof rawData === "object") {
+      if (Array.isArray((rawData as { creations?: unknown[] }).creations)) {
+        items = (rawData as { creations: unknown[] }).creations;
+      } else {
+        items = [rawData];
+      }
+    }
+
+    const existingIds = new Set(history.map((c) => c.id));
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        result.skipped.push({ creation: {}, reason: "无效数据格式" });
+        result.skippedCount++;
+        continue;
+      }
+
+      const obj = item as Record<string, unknown>;
+
+      let id: string;
+      if (typeof obj.id === "string") {
+        id = obj.id;
+      } else {
+        id = crypto.randomUUID();
+      }
+
+      if (existingIds.has(id)) {
+        result.skipped.push({
+          creation: { ...(obj as Partial<Creation> & { id: string }) },
+          reason: "同ID作品已存在"
+        });
+        result.skippedCount++;
+        continue;
+      }
+
+      const normalized = normalizeCreation({
+        ...(obj as Partial<Creation>),
+        id
+      });
+
+      if (normalized.notes.length === 0 && normalized.score === 0) {
+        result.skipped.push({
+          creation: { ...(obj as Partial<Creation> & { id: string }) },
+          reason: "无有效香调和评分"
+        });
+        result.skippedCount++;
+        continue;
+      }
+
+      result.success.push(normalized);
+      result.successCount++;
+      existingIds.add(id);
+    }
+
+    return result;
+  }
+
+  function importCreations(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const rawData = JSON.parse(content);
+        const importResult = parseImportData(rawData);
+
+        if (importResult.success.length > 0) {
+          const merged = [...importResult.success, ...history].slice(0, 50);
+          setHistory(merged);
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+
+          for (const creation of importResult.success) {
+            if (hasTraits(creation) && creation.score > 0) {
+              const newlyUnlockedNotes = getNewlyUnlockedNotes(
+                creation.traits,
+                creation.score,
+                unlockedNoteIds
+              );
+              if (newlyUnlockedNotes.length > 0) {
+                const nextUnlocked = [...unlockedNoteIds, ...newlyUnlockedNotes.map((n) => n.id)];
+                setUnlockedNoteIds(nextUnlocked);
+                saveUnlockedNotes(nextUnlocked);
+                setNewlyUnlocked((prev) => {
+                  const existingIds = new Set(prev.map((n) => n.id));
+                  const newNotes = newlyUnlockedNotes.filter((n) => !existingIds.has(n.id));
+                  return [...prev, ...newNotes];
+                });
+                setUnlockNotificationOpen(true);
+              }
+            }
+          }
+        }
+
+        setImportResult(importResult);
+        setImportNotificationOpen(true);
+      } catch {
+        setImportResult({
+          success: [],
+          skipped: [{ creation: {}, reason: "文件解析失败，请确认是有效的JSON文件" }],
+          successCount: 0,
+          skippedCount: 1
+        });
+        setImportNotificationOpen(true);
+      }
+    };
+    reader.readAsText(file);
   }
 
   function openCompare() {
@@ -1266,6 +1399,25 @@ export default function App() {
               >
                 导出作品
               </button>
+              <button
+                className="ghost-button small import-button"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                导入作品
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    importCreations(file);
+                  }
+                  e.target.value = "";
+                }}
+              />
             </div>
           </div>
           {calendarOpen ? (
@@ -1785,6 +1937,82 @@ export default function App() {
                 onClick={() => setReplicateNotificationOpen(false)}
               >
                 开始调整
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importNotificationOpen && importResult && (
+        <div className="drawer-overlay import-overlay" onClick={() => setImportNotificationOpen(false)}>
+          <div className="import-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setImportNotificationOpen(false)}>×</button>
+            <div className="import-content">
+              <div className={`import-icon ${importResult.skippedCount > 0 ? "partial" : ""}`}>
+                {importResult.successCount > 0 ? (importResult.skippedCount > 0 ? "⚠" : "✓") : "✕"}
+              </div>
+              <h2 className="import-title">
+                {importResult.successCount > 0
+                  ? importResult.skippedCount > 0
+                    ? "部分作品导入成功"
+                    : "作品导入成功"
+                  : "导入失败"}
+              </h2>
+              <p className="import-subtitle">
+                {importResult.successCount > 0
+                  ? `成功导入 ${importResult.successCount} 个作品`
+                  : "没有成功导入的作品"}
+                {importResult.skippedCount > 0 && `，跳过 ${importResult.skippedCount} 个`}
+              </p>
+              {importResult.success.length > 0 && (
+                <div className="import-details">
+                  <div className="import-detail-section">
+                    <h3>成功导入的作品</h3>
+                    <div className="import-success-list">
+                      {importResult.success.slice(0, 5).map((creation) => (
+                        <div key={creation.id} className="import-success-item">
+                          <span className="import-success-score">{creation.score}分</span>
+                          <span className="import-success-name">{creation.name}</span>
+                          <span className="import-success-notes">
+                            {(creation.notes || []).join(" / ") || "无香调"}
+                          </span>
+                        </div>
+                      ))}
+                      {importResult.success.length > 5 && (
+                        <div className="import-more-hint">还有 {importResult.success.length - 5} 个作品...</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {importResult.skipped.length > 0 && (
+                <div className="import-details">
+                  <div className="import-detail-section">
+                    <h3>跳过的作品及原因</h3>
+                    <div className="import-skipped-list">
+                      {(() => {
+                        const reasonGroups = new Map<string, number>();
+                        importResult.skipped.forEach((item) => {
+                          const reason = item.reason || "未知原因";
+                          reasonGroups.set(reason, (reasonGroups.get(reason) || 0) + 1);
+                        });
+                        return Array.from(reasonGroups.entries()).map(([reason, count]) => (
+                          <div key={reason} className="import-skipped-item">
+                            <span className="import-skipped-icon">⚠</span>
+                            <span className="import-skipped-reason">{reason}</span>
+                            <span className="import-skipped-count">{count} 个</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <button
+                className="primary-button"
+                onClick={() => setImportNotificationOpen(false)}
+              >
+                知道了
               </button>
             </div>
           </div>

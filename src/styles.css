@@ -1525,6 +1525,189 @@ meter {
   opacity: 0.6;
 }
 
+.history-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-sort-select {
+  display: flex;
+  align-items: center;
+}
+
+.sort-select {
+  padding: 6px 10px;
+  border: 1px solid rgba(58, 42, 28, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 252, 246, 0.9);
+  font-size: 0.85rem;
+  color: #3a2a1c;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sort-select:hover {
+  border-color: rgba(58, 42, 28, 0.35);
+  background: #fff;
+}
+
+.sort-select:focus {
+  outline: none;
+  border-color: #78c6a3;
+  box-shadow: 0 0 0 2px rgba(120, 198, 163, 0.2);
+}
+
+.filter-toggle-button.has-filters {
+  color: #78c6a3;
+  border-color: rgba(120, 198, 163, 0.4);
+  background: rgba(120, 198, 163, 0.08);
+}
+
+.filter-toggle-button.active {
+  background: rgba(120, 198, 163, 0.15);
+  border-color: #78c6a3;
+}
+
+.filter-panel {
+  background: rgba(255, 252, 246, 0.95);
+  border: 1px solid rgba(58, 42, 28, 0.12);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  animation: slideDown 0.25s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.filter-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-row:last-child {
+  margin-bottom: 0;
+}
+
+.filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.filter-item label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5c4a3a;
+  margin: 0;
+}
+
+.filter-input {
+  padding: 8px 12px;
+  border: 1px solid rgba(58, 42, 28, 0.2);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+  color: #3a2a1c;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.filter-input:hover {
+  border-color: rgba(58, 42, 28, 0.35);
+}
+
+.filter-input:focus {
+  outline: none;
+  border-color: #78c6a3;
+  box-shadow: 0 0 0 2px rgba(120, 198, 163, 0.2);
+}
+
+.filter-input::placeholder {
+  color: #a8988a;
+}
+
+.score-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.score-input {
+  width: 100%;
+  min-width: 80px;
+}
+
+.score-range-separator {
+  color: #8a7a6a;
+  font-weight: 600;
+}
+
+.filter-radio-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #3a2a1c;
+  margin: 0;
+}
+
+.filter-radio input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: #78c6a3;
+}
+
+.filter-radio span {
+  user-select: none;
+}
+
+.filter-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(58, 42, 28, 0.1);
+}
+
+.filter-result-count {
+  font-size: 0.85rem;
+  color: #5c4a3a;
+  font-weight: 500;
+}
+
 .history-actions {
   display: flex;
   gap: 8px;
@@ -1585,9 +1768,49 @@ meter {
   }
 }
 
+@media (max-width: 768px) {
+  .history-title-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .history-header-right {
+    justify-content: space-between;
+  }
+
+  .sort-select {
+    width: 100%;
+  }
+
+  .filter-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .filter-item {
+    min-width: 100%;
+  }
+}
+
 @media (max-width: 480px) {
   .compare-content {
     padding: 24px 16px 20px;
+  }
+
+  .history-header-right {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .history-sort-select {
+    width: 100%;
+  }
+
+  .filter-toggle-button {
+    width: 100%;
+    text-align: center;
   }
 
   .history-actions {
@@ -1598,6 +1821,16 @@ meter {
 
   .history-actions .ghost-button.small {
     width: 100%;
+    text-align: center;
+  }
+
+  .filter-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .filter-result-count {
     text-align: center;
   }
 }

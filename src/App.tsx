@@ -243,6 +243,8 @@ type DraftData = {
   customName: string;
   replicateSourceId?: string;
   replicateSourceName?: string;
+  editingSourceId?: string;
+  editingSourceName?: string;
 };
 
 function loadDraft(): DraftData | null {
@@ -1015,6 +1017,22 @@ export default function App() {
   const [draftBannerVisible, setDraftBannerVisible] = useState<boolean>(() => loadDraft() !== null);
   const [unlockProgressOpen, setUnlockProgressOpen] = useState<boolean>(false);
   const [selectedProgressNoteId, setSelectedProgressNoteId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<Creation | null>(() => {
+    const draft = loadDraft();
+    if (draft?.editingSourceId && draft?.editingSourceName) {
+      return {
+        id: draft.editingSourceId,
+        name: draft.editingSourceName,
+        originalName: draft.editingSourceName,
+        score: 0,
+        description: "",
+        notes: [],
+        createdAt: new Date().toISOString()
+      } as Creation;
+    }
+    return null;
+  });
+  const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1049,12 +1067,14 @@ export default function App() {
         selectedNotes,
         customName,
         replicateSourceId: replicateSource?.id,
-        replicateSourceName: replicateSource?.name
+        replicateSourceName: replicateSource?.name,
+        editingSourceId: editingSource?.id,
+        editingSourceName: editingSource?.name
       });
     } else {
       clearDraft();
     }
-  }, [selectedNotes, customName, replicateSource]);
+  }, [selectedNotes, customName, replicateSource, editingSource]);
 
   const unlockedNotes = useMemo(
     () => notes.filter((note) => unlockedNoteIds.includes(note.id)),
@@ -1304,10 +1324,8 @@ export default function App() {
     });
   }
 
-  function bottleCreation() {
-    if (!current || selectedNotes.length === 0) return;
-    if (!isValidForBottling) return;
-    const finalName = customName.trim() || current.name;
+  function buildCurrentCreation(): { creation: Creation; newlyUnlockedNotes: Note[] } {
+    const finalName = customName.trim() || current!.name;
     const noteDropsMap: Record<string, number> = {};
     selectedNoteObjects.forEach(({ note, drops }) => {
       noteDropsMap[note.name] = drops;
@@ -1315,9 +1333,9 @@ export default function App() {
     const creation: Creation = {
       id: crypto.randomUUID(),
       name: finalName,
-      originalName: current.name,
-      score: current.score,
-      description: current.description,
+      originalName: current!.name,
+      score: current!.score,
+      description: current!.description,
       traits,
       notes: selectedNoteObjects.map(({ note }) => note.name),
       noteDrops: noteDropsMap,
@@ -1326,15 +1344,15 @@ export default function App() {
       sourceCreationName: replicateSource?.name,
       isReplicate: !!replicateSource
     };
-    const next = [creation, ...history].slice(0, 5);
-    setHistory(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
-
     const newlyUnlockedNotes = getNewlyUnlockedNotes(
       traits,
-      current.score,
+      current!.score,
       unlockedNoteIds
     );
+    return { creation, newlyUnlockedNotes };
+  }
+
+  function finalizeAfterSave(newlyUnlockedNotes: Note[]) {
     if (newlyUnlockedNotes.length > 0) {
       const nextUnlocked = [...unlockedNoteIds, ...newlyUnlockedNotes.map((n) => n.id)];
       setUnlockedNoteIds(nextUnlocked);
@@ -1342,7 +1360,6 @@ export default function App() {
       setNewlyUnlocked(newlyUnlockedNotes);
       setUnlockNotificationOpen(true);
     }
-
     clearDraft();
     setSelectedNotes([]);
     setCustomName("");
@@ -1350,6 +1367,54 @@ export default function App() {
     setIsEditingName(false);
     setReplicateSource(null);
     setReplicateResult(null);
+    setEditingSource(null);
+  }
+
+  function saveAsNewCreation() {
+    if (!current || selectedNotes.length === 0) return;
+    if (!isValidForBottling) return;
+    const { creation, newlyUnlockedNotes } = buildCurrentCreation();
+    const next = [creation, ...history].slice(0, 50);
+    setHistory(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    finalizeAfterSave(newlyUnlockedNotes);
+    setSaveDialogOpen(false);
+  }
+
+  function overwriteOriginalCreation() {
+    if (!current || selectedNotes.length === 0 || !editingSource) return;
+    if (!isValidForBottling) return;
+    const { creation: newCreation, newlyUnlockedNotes } = buildCurrentCreation();
+
+    const original = history.find((c) => c.id === editingSource.id);
+    const updatedCreation: Creation = {
+      ...newCreation,
+      id: editingSource.id,
+      createdAt: original?.createdAt || editingSource.createdAt,
+      sourceCreationId: original?.sourceCreationId ?? editingSource.sourceCreationId,
+      sourceCreationName: original?.sourceCreationName ?? editingSource.sourceCreationName,
+      isReplicate: !!(original?.isReplicate ?? editingSource.isReplicate)
+    };
+
+    const next = history.map((c) => (c.id === editingSource.id ? updatedCreation : c));
+    if (!next.find((c) => c.id === editingSource.id)) {
+      next.unshift(updatedCreation);
+    }
+    const sliced = next.slice(0, 50);
+    setHistory(sliced);
+    localStorage.setItem(storageKey, JSON.stringify(sliced));
+    finalizeAfterSave(newlyUnlockedNotes);
+    setSaveDialogOpen(false);
+  }
+
+  function bottleCreation() {
+    if (!current || selectedNotes.length === 0) return;
+    if (!isValidForBottling) return;
+    if (editingSource) {
+      setSaveDialogOpen(true);
+    } else {
+      saveAsNewCreation();
+    }
   }
 
   function replicateCreation(creation: Creation) {
@@ -1408,6 +1473,44 @@ export default function App() {
   function clearReplicateSource() {
     setReplicateSource(null);
     setReplicateResult(null);
+  }
+
+  function continueAdjusting(creation: Creation) {
+    const analysis = analyzeReplicability(creation, unlockedNoteIds);
+    if (!analysis.canReplicate) {
+      return;
+    }
+
+    const creationDrops = getCreationNoteDrops(creation);
+    const restoredItems: SelectedNote[] = [];
+    for (const noteId of analysis.allUnlocked) {
+      const note = getNoteById(noteId);
+      if (note && restoredItems.length < MAX_NOTES) {
+        const drops = Math.max(MIN_DROPS_PER_NOTE, Math.min(MAX_DROPS_PER_NOTE, creationDrops[note.name] || creationDrops[noteId] || DEFAULT_DROPS));
+        restoredItems.push({ noteId, drops });
+      }
+    }
+
+    let remainingTotal = MAX_TOTAL_DROPS;
+    const clampedItems = restoredItems.map((item, idx, arr) => {
+      const safeDrops = Math.min(item.drops, remainingTotal);
+      remainingTotal -= safeDrops;
+      const minDrops = arr.length === 1 ? MIN_TOTAL_DROPS : MIN_DROPS_PER_NOTE;
+      return { ...item, drops: Math.max(minDrops, safeDrops) };
+    });
+
+    setSelectedNotes(clampedItems);
+    setCustomName(creation.name);
+    setPendingCustomName(creation.name);
+    setIsEditingName(false);
+    setEditingSource(creation);
+    setReplicateSource(null);
+    setReplicateResult(null);
+    closeCreationDetail();
+  }
+
+  function clearEditingSource() {
+    setEditingSource(null);
   }
 
   function handleQuizAnswer(option: QuizOption) {
@@ -1730,6 +1833,7 @@ export default function App() {
             setIsEditingName(false);
             setReplicateSource(null);
             setReplicateResult(null);
+            setEditingSource(null);
           }}
         >
           清空调香台
@@ -2146,6 +2250,21 @@ export default function App() {
                             clearReplicateSource();
                           }}
                           title="取消复刻标记"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
+                    {editingSource && (
+                      <span className="replicate-source editing-source">
+                        ✎ 调整自：{editingSource.name}
+                        <button
+                          className="replicate-clear-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearEditingSource();
+                          }}
+                          title="取消调整标记，保存时将作为新作品"
                         >
                           ×
                         </button>
@@ -2736,23 +2855,40 @@ export default function App() {
               <div className="creation-actions">
                 {(() => {
                   const analysis = analyzeReplicability(activeCreation, unlockedNoteIds);
-                  const disabled = activeCreation.notes.length === 0 || !analysis.canReplicate;
-                  let buttonText = "✦ 复刻到调香台";
+                  const canReplicate = activeCreation.notes.length > 0 && analysis.canReplicate;
+                  let replicateButtonText = "✦ 复刻到调香台";
                   if (activeCreation.notes.length === 0) {
-                    buttonText = "无香调可复刻";
+                    replicateButtonText = "无香调可复刻";
                   } else if (!analysis.canReplicate) {
-                    buttonText = "无可复刻香调";
+                    replicateButtonText = "无可复刻香调";
                   } else if (analysis.isPartial) {
-                    buttonText = `✦ 部分复刻（${analysis.unlockedCount}/${activeCreation.notes.length}种）`;
+                    replicateButtonText = `✦ 部分复刻（${analysis.unlockedCount}/${activeCreation.notes.length}种）`;
+                  }
+                  let adjustButtonText = "✎ 继续调整";
+                  if (activeCreation.notes.length === 0) {
+                    adjustButtonText = "无香调可调整";
+                  } else if (!analysis.canReplicate) {
+                    adjustButtonText = "无可调整香调";
+                  } else if (analysis.isPartial) {
+                    adjustButtonText = `✎ 继续调整（${analysis.unlockedCount}/${activeCreation.notes.length}种）`;
                   }
                   return (
-                    <button
-                      className={`primary-button replicate-action-btn ${analysis.isPartial ? "partial-btn" : ""}`}
-                      onClick={() => replicateCreation(activeCreation)}
-                      disabled={disabled}
-                    >
-                      {buttonText}
-                    </button>
+                    <>
+                      <button
+                        className={`primary-button replicate-action-btn ${analysis.isPartial ? "partial-btn" : ""}`}
+                        onClick={() => replicateCreation(activeCreation)}
+                        disabled={!canReplicate}
+                      >
+                        {replicateButtonText}
+                      </button>
+                      <button
+                        className={`ghost-button replicate-action-btn adjust-action-btn ${analysis.isPartial ? "partial-btn" : ""}`}
+                        onClick={() => continueAdjusting(activeCreation)}
+                        disabled={!canReplicate}
+                      >
+                        {adjustButtonText}
+                      </button>
+                    </>
                   );
                 })()}
               </div>
@@ -2960,6 +3096,57 @@ export default function App() {
                 onClick={() => setImportNotificationOpen(false)}
               >
                 知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saveDialogOpen && editingSource && current && (
+        <div className="drawer-overlay save-overlay" onClick={() => setSaveDialogOpen(false)}>
+          <div className="save-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setSaveDialogOpen(false)}>×</button>
+            <div className="save-content">
+              <div className="save-icon">💾</div>
+              <h2 className="save-title">保存作品</h2>
+              <p className="save-subtitle">
+                正在调整的作品：<b>{editingSource.name}</b>
+                {editingSource.sourceCreationName && (
+                  <>
+                    {" "}（来源：{editingSource.sourceCreationName}）
+                  </>
+                )}
+              </p>
+              <p className="save-description">
+                调整后新作品名为：<b>{displayName}</b>
+              </p>
+              <div className="save-options">
+                <button
+                  className="save-option-card"
+                  onClick={saveAsNewCreation}
+                >
+                  <div className="save-option-icon">✨</div>
+                  <h3>保存为新作品</h3>
+                  <p>保留原作品不变，创建一个新的作品记录</p>
+                </button>
+                <button
+                  className="save-option-card save-option-overwrite"
+                  onClick={overwriteOriginalCreation}
+                >
+                  <div className="save-option-icon">✎</div>
+                  <h3>覆盖原作品</h3>
+                  <p>
+                    更新原作品的配方、名称和评分，
+                    保留原始创建时间
+                    {editingSource.sourceCreationName && "和来源信息"}
+                  </p>
+                </button>
+              </div>
+              <button
+                className="ghost-button"
+                onClick={() => setSaveDialogOpen(false)}
+              >
+                取消
               </button>
             </div>
           </div>

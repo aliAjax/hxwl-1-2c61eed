@@ -668,19 +668,41 @@ export default function App() {
     if (!activeNote || selectedNotes.length >= MAX_NOTES) return;
     if (!unlockedNoteIds.includes(activeNote.id)) return;
     if (selectedNotes.some((s) => s.noteId === activeNote.id)) return;
-    setSelectedNotes((items) => [...items, { noteId: activeNote.id, drops: DEFAULT_DROPS }]);
+    const initialDrops = selectedNotes.length === 0 ? MIN_TOTAL_DROPS : DEFAULT_DROPS;
+    setSelectedNotes((items) => [...items, { noteId: activeNote.id, drops: initialDrops }]);
     closeNoteDetail();
   }
 
   function removeNoteAtIndex(index: number) {
-    setSelectedNotes((items) => items.filter((_, i) => i !== index));
+    setSelectedNotes((items) => {
+      const remaining = items.filter((_, i) => i !== index);
+      if (remaining.length === 1) {
+        const currentTotal = getTotalDrops(remaining);
+        if (currentTotal < MIN_TOTAL_DROPS) {
+          return [{ ...remaining[0], drops: MIN_TOTAL_DROPS }];
+        }
+      }
+      return remaining;
+    });
+  }
+
+  function getEffectiveMinDrops(allItems: SelectedNote[], itemIndex: number): number {
+    if (allItems.length === 1) {
+      return MIN_TOTAL_DROPS;
+    }
+    return MIN_DROPS_PER_NOTE;
   }
 
   function updateNoteDrops(index: number, newDrops: number) {
-    const clampedDrops = Math.max(MIN_DROPS_PER_NOTE, Math.min(MAX_DROPS_PER_NOTE, Math.round(newDrops)));
-    setSelectedNotes((items) =>
-      items.map((item, i) => (i === index ? { ...item, drops: clampedDrops } : item))
-    );
+    setSelectedNotes((items) => {
+      const effectiveMin = getEffectiveMinDrops(items, index);
+      const effectiveMax = Math.min(
+        MAX_DROPS_PER_NOTE,
+        MAX_TOTAL_DROPS - (getTotalDrops(items) - items[index].drops)
+      );
+      const clampedDrops = Math.max(effectiveMin, Math.min(effectiveMax, Math.round(newDrops)));
+      return items.map((item, i) => (i === index ? { ...item, drops: clampedDrops } : item));
+    });
   }
 
   function increaseNoteDrops(index: number) {
@@ -698,7 +720,8 @@ export default function App() {
     setSelectedNotes((items) => {
       const current = items[index];
       if (!current) return items;
-      if (current.drops <= MIN_DROPS_PER_NOTE) return items;
+      const effectiveMin = getEffectiveMinDrops(items, index);
+      if (current.drops <= effectiveMin) return items;
       return items.map((item, i) => (i === index ? { ...item, drops: item.drops - 1 } : item));
     });
   }
@@ -785,10 +808,11 @@ export default function App() {
     };
 
     let remainingTotal = MAX_TOTAL_DROPS;
-    const clampedItems = restoredItems.map((item) => {
+    const clampedItems = restoredItems.map((item, idx, arr) => {
       const safeDrops = Math.min(item.drops, remainingTotal);
       remainingTotal -= safeDrops;
-      return { ...item, drops: Math.max(MIN_DROPS_PER_NOTE, safeDrops) };
+      const minDrops = arr.length === 1 ? MIN_TOTAL_DROPS : MIN_DROPS_PER_NOTE;
+      return { ...item, drops: Math.max(minDrops, safeDrops) };
     });
 
     setSelectedNotes(clampedItems);
@@ -833,7 +857,10 @@ export default function App() {
     const newItems: SelectedNote[] = recommended
       .filter((n) => !existingIds.has(n.id))
       .slice(0, MAX_NOTES - selectedNotes.length)
-      .map((n) => ({ noteId: n.id, drops: DEFAULT_DROPS }));
+      .map((n, i) => ({
+        noteId: n.id,
+        drops: selectedNotes.length === 0 && i === 0 ? MIN_TOTAL_DROPS : DEFAULT_DROPS
+      }));
     if (newItems.length > 0) {
       setSelectedNotes((items) => [...items, ...newItems]);
     }
@@ -1039,7 +1066,15 @@ export default function App() {
           </div>
           {totalDrops > 0 && !isValidForBottling && (
             <div className="drops-warning">
-              ⚠ 总滴数需在 {MIN_TOTAL_DROPS}-{MAX_TOTAL_DROPS} 之间才能封瓶
+              {totalDrops < MIN_TOTAL_DROPS ? (
+                selectedNotes.length === 1 ? (
+                  <>⚠ 单香调至少需要 {MIN_TOTAL_DROPS} 滴才能封瓶，请增加滴数</>
+                ) : (
+                  <>⚠ 总滴数不足 {MIN_TOTAL_DROPS}，请增加香调或滴数</>
+                )
+              ) : (
+                <>⚠ 总滴数超过 {MAX_TOTAL_DROPS}，请减少滴数</>
+              )}
             </div>
           )}
           <div className="bottle">
@@ -1065,7 +1100,8 @@ export default function App() {
           <div className="selected-list">
             {selectedNoteObjects.map(({ note, drops }, index) => {
               const canIncrease = drops < MAX_DROPS_PER_NOTE && totalDrops < MAX_TOTAL_DROPS;
-              const canDecrease = drops > MIN_DROPS_PER_NOTE;
+              const effectiveMin = getEffectiveMinDrops(selectedNotes, index);
+              const canDecrease = drops > effectiveMin;
               return (
                 <div key={`${note.id}-${index}`} className="selected-item-row">
                   <button
@@ -1081,6 +1117,7 @@ export default function App() {
                       className="drops-btn minus"
                       onClick={() => decreaseNoteDrops(index)}
                       disabled={!canDecrease}
+                      title={canDecrease ? "减少滴数" : selectedNotes.length === 1 ? `单香调最少需要 ${MIN_TOTAL_DROPS} 滴` : `最少 ${MIN_DROPS_PER_NOTE} 滴`}
                     >
                       −
                     </button>
@@ -1092,6 +1129,7 @@ export default function App() {
                       className="drops-btn plus"
                       onClick={() => increaseNoteDrops(index)}
                       disabled={!canIncrease}
+                      title={canIncrease ? "增加滴数" : totalDrops >= MAX_TOTAL_DROPS ? `总滴数已达上限 ${MAX_TOTAL_DROPS}` : `单香调最多 ${MAX_DROPS_PER_NOTE} 滴`}
                     >
                       +
                     </button>

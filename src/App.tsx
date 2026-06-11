@@ -562,11 +562,17 @@ function analyzeReplicability(
 type QuizOption = {
   label: string;
   traitDelta: Partial<Record<Trait, number>>;
+  intensityBoost?: number;
 };
 
 type QuizQuestion = {
   question: string;
   options: QuizOption[];
+};
+
+type RecommendedNote = {
+  note: Note;
+  recommendedDrops: number;
 };
 
 const quizQuestions: QuizQuestion[] = [
@@ -589,15 +595,45 @@ const quizQuestions: QuizQuestion[] = [
   {
     question: "香气的浓淡偏好？",
     options: [
-      { label: "轻透淡雅", traitDelta: { fresh: 2 } },
-      { label: "刚好就好", traitDelta: {} },
-      { label: "浓郁有存在感", traitDelta: { sweet: 1, wood: 1, spice: 1 } }
+      { label: "轻透淡雅", traitDelta: { fresh: 2 }, intensityBoost: -2 },
+      { label: "刚好就好", traitDelta: {}, intensityBoost: 0 },
+      { label: "浓郁有存在感", traitDelta: { sweet: 1, wood: 1, spice: 1 }, intensityBoost: 3 }
+    ]
+  },
+  {
+    question: "主要在什么场景使用？",
+    options: [
+      { label: "日常通勤 / 办公", traitDelta: { fresh: 2, wood: 1 }, intensityBoost: 0 },
+      { label: "约会 / 社交聚会", traitDelta: { sweet: 2, spice: 1 }, intensityBoost: 1 },
+      { label: "居家放松 / 睡前", traitDelta: { wood: 2, sweet: 1 }, intensityBoost: -1 },
+      { label: "运动 / 户外活动", traitDelta: { fresh: 2, spice: 1 }, intensityBoost: 1 }
+    ]
+  },
+  {
+    question: "更偏爱哪个季节的氛围？",
+    options: [
+      { label: "春：万物复苏", traitDelta: { fresh: 2, sweet: 1 }, intensityBoost: 0 },
+      { label: "夏：烈日海风", traitDelta: { fresh: 3 }, intensityBoost: -1 },
+      { label: "秋：落叶暖阳", traitDelta: { wood: 2, sweet: 1 }, intensityBoost: 1 },
+      { label: "冬：壁炉暖意", traitDelta: { spice: 2, wood: 1, sweet: 1 }, intensityBoost: 2 }
     ]
   }
 ];
 
-function recommendNotes(quizTraits: Record<Trait, number>, unlockedIds: string[]): Note[] {
-  return [...notes]
+function recommendNotes(
+  quizTraits: Record<Trait, number>,
+  intensityBoost: number,
+  unlockedIds: string[],
+  targetCount: number = 3
+): RecommendedNote[] {
+  const totalTraitWeight = Math.max(
+    1,
+    (Object.keys(quizTraits) as Trait[]).reduce((s, t) => s + quizTraits[t], 0)
+  );
+  const baseDrops = 5;
+  const adjustedBase = Math.max(2, Math.min(8, baseDrops + intensityBoost));
+
+  const scored = [...notes]
     .filter((note) => unlockedIds.includes(note.id))
     .map((note) => {
       let score = 0;
@@ -606,9 +642,23 @@ function recommendNotes(quizTraits: Record<Trait, number>, unlockedIds: string[]
       });
       return { note, score };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((item) => item.note);
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) return [];
+
+  const topNotes = scored.slice(0, Math.min(targetCount, scored.length));
+  const topScore = Math.max(1, topNotes[0].score);
+
+  return topNotes.map(({ note, score }) => {
+    const ratio = score / topScore;
+    const rawDrops = Math.max(1, Math.round(adjustedBase * ratio));
+    const clampedDrops = Math.max(
+      MIN_DROPS_PER_NOTE,
+      Math.min(MAX_DROPS_PER_NOTE, rawDrops)
+    );
+    return { note, recommendedDrops: clampedDrops };
+  });
 }
 
 export default function App() {
@@ -641,6 +691,7 @@ export default function App() {
   const [quizOpen, setQuizOpen] = useState(false);
   const [quizStep, setQuizStep] = useState(0);
   const [quizTraits, setQuizTraits] = useState<Record<Trait, number>>({ fresh: 0, sweet: 0, wood: 0, spice: 0 });
+  const [quizIntensity, setQuizIntensity] = useState(0);
   const [quizDone, setQuizDone] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareId1, setCompareId1] = useState<string | null>(null);
@@ -993,15 +1044,18 @@ export default function App() {
   }
 
   function handleQuizAnswer(option: QuizOption) {
-    const next = { ...quizTraits };
+    const nextTraits = { ...quizTraits };
     (Object.keys(option.traitDelta) as Trait[]).forEach((trait) => {
-      next[trait] += option.traitDelta[trait] ?? 0;
+      nextTraits[trait] += option.traitDelta[trait] ?? 0;
     });
+    const nextIntensity = quizIntensity + (option.intensityBoost ?? 0);
     if (quizStep < quizQuestions.length - 1) {
-      setQuizTraits(next);
+      setQuizTraits(nextTraits);
+      setQuizIntensity(nextIntensity);
       setQuizStep(quizStep + 1);
     } else {
-      setQuizTraits(next);
+      setQuizTraits(nextTraits);
+      setQuizIntensity(nextIntensity);
       setQuizDone(true);
     }
   }
@@ -1009,22 +1063,112 @@ export default function App() {
   function resetQuiz() {
     setQuizStep(0);
     setQuizTraits({ fresh: 0, sweet: 0, wood: 0, spice: 0 });
+    setQuizIntensity(0);
     setQuizDone(false);
   }
 
   function applyRecommendation() {
-    const recommended = recommendNotes(quizTraits, unlockedNoteIds);
-    const existingIds = new Set(selectedNotes.map((s) => s.noteId));
-    const newItems: SelectedNote[] = recommended
-      .filter((n) => !existingIds.has(n.id))
-      .slice(0, MAX_NOTES - selectedNotes.length)
-      .map((n, i) => ({
-        noteId: n.id,
-        drops: selectedNotes.length === 0 && i === 0 ? MIN_TOTAL_DROPS : DEFAULT_DROPS
-      }));
-    if (newItems.length > 0) {
-      setSelectedNotes((items) => [...items, ...newItems]);
+    const existingSelected = [...selectedNotes];
+    const existingIds = new Set(existingSelected.map((s) => s.noteId));
+    const slotsRemaining = MAX_NOTES - existingSelected.length;
+
+    if (slotsRemaining <= 0) {
+      setQuizOpen(false);
+      resetQuiz();
+      return;
     }
+
+    const recommendations = recommendNotes(
+      quizTraits,
+      quizIntensity,
+      unlockedNoteIds,
+      3
+    );
+
+    const newRecs = recommendations.filter((r) => !existingIds.has(r.note.id));
+    const toAdd = newRecs.slice(0, slotsRemaining);
+
+    const existingTotal = existingSelected.reduce((s, i) => s + i.drops, 0);
+    const recTotalRaw = toAdd.reduce((s, r) => s + r.recommendedDrops, 0);
+    const combinedTotalRaw = existingTotal + recTotalRaw;
+
+    let finalNewItems: SelectedNote[] = [];
+
+    if (toAdd.length === 0) {
+      setQuizOpen(false);
+      resetQuiz();
+      return;
+    }
+
+    if (existingSelected.length === 0 && toAdd.length === 1) {
+      const d = Math.max(
+        MIN_TOTAL_DROPS,
+        Math.min(MAX_DROPS_PER_NOTE, toAdd[0].recommendedDrops)
+      );
+      finalNewItems = [{ noteId: toAdd[0].note.id, drops: d }];
+    } else if (combinedTotalRaw < MIN_TOTAL_DROPS && existingSelected.length === 0) {
+      const scaleUp = MIN_TOTAL_DROPS / recTotalRaw;
+      let scaled = toAdd.map((r) => ({
+        noteId: r.note.id,
+        drops: Math.max(MIN_DROPS_PER_NOTE, Math.round(r.recommendedDrops * scaleUp))
+      }));
+      let scaledTotal = scaled.reduce((s, i) => s + i.drops, 0);
+      let idx = 0;
+      while (scaledTotal < MIN_TOTAL_DROPS && idx < scaled.length) {
+        if (scaled[idx].drops < MAX_DROPS_PER_NOTE) {
+          scaled[idx].drops += 1;
+          scaledTotal += 1;
+        }
+        idx++;
+        if (idx >= scaled.length) idx = 0;
+      }
+      finalNewItems = scaled.map((s) => ({
+        noteId: s.noteId,
+        drops: Math.min(MAX_DROPS_PER_NOTE, s.drops)
+      }));
+    } else if (combinedTotalRaw > MAX_TOTAL_DROPS) {
+      const allowedForNew = Math.max(
+        toAdd.length * MIN_DROPS_PER_NOTE,
+        MAX_TOTAL_DROPS - existingTotal
+      );
+      const scaleDown = allowedForNew / recTotalRaw;
+      let scaled = toAdd.map((r) => ({
+        noteId: r.note.id,
+        drops: Math.max(MIN_DROPS_PER_NOTE, Math.round(r.recommendedDrops * scaleDown))
+      }));
+      let scaledTotal = scaled.reduce((s, i) => s + i.drops, 0);
+      let idx = 0;
+      while (scaledTotal > allowedForNew && scaledTotal > toAdd.length * MIN_DROPS_PER_NOTE && idx < 1000) {
+        const maxIdx = scaled.reduce(
+          (mi, it, i) => (it.drops > scaled[mi].drops ? i : mi),
+          0
+        );
+        if (scaled[maxIdx].drops > MIN_DROPS_PER_NOTE) {
+          scaled[maxIdx].drops -= 1;
+          scaledTotal -= 1;
+        }
+        idx++;
+      }
+      finalNewItems = scaled;
+    } else {
+      finalNewItems = toAdd.map((r) => ({
+        noteId: r.note.id,
+        drops: r.recommendedDrops
+      }));
+    }
+
+    const existingAfterClamp = existingSelected.map((s, i) => {
+      const others = [...existingSelected.slice(0, i), ...existingSelected.slice(i + 1), ...finalNewItems];
+      const otherTotal = others.reduce((sum, o) => sum + o.drops, 0);
+      const maxForItem = Math.max(MIN_DROPS_PER_NOTE, MAX_TOTAL_DROPS - otherTotal);
+      const effectiveMin = existingSelected.length === 1 && finalNewItems.length === 0 ? MIN_TOTAL_DROPS : MIN_DROPS_PER_NOTE;
+      return {
+        ...s,
+        drops: Math.max(effectiveMin, Math.min(MAX_DROPS_PER_NOTE, Math.min(s.drops, maxForItem)))
+      };
+    });
+
+    setSelectedNotes([...existingAfterClamp, ...finalNewItems]);
     setQuizOpen(false);
     resetQuiz();
   }
@@ -1272,11 +1416,14 @@ export default function App() {
               <>
                 <p className="quiz-result-label">为你推荐以下香调组合</p>
                 <div className="quiz-recommendations">
-                  {recommendNotes(quizTraits, unlockedNoteIds).map((note) => (
+                  {recommendNotes(quizTraits, quizIntensity, unlockedNoteIds, 3).map(({ note, recommendedDrops }) => (
                     <div key={note.id} className="quiz-rec-card">
                       <span className="swatch" style={{ background: note.color }} />
                       <strong>{note.name}</strong>
                       <small>{note.profile}</small>
+                      <span className="quiz-rec-drops" title="建议滴数">
+                        建议 {recommendedDrops} 滴
+                      </span>
                     </div>
                   ))}
                 </div>

@@ -1030,6 +1030,18 @@ meter {
   line-height: 1.4;
 }
 
+.quiz-rec-drops {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 12px;
+  background: linear-gradient(135deg, rgba(183, 123, 84, 0.12), rgba(244, 201, 93, 0.18));
+  color: #8a5a34;
+  border: 1px solid rgba(183, 123, 84, 0.3);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 .quiz-traits-preview {
   display: flex;
   gap: 8px;

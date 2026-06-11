@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { libraryDB } from "./library";
 
 type Note = {
   id: string;
@@ -57,6 +58,13 @@ type ImportResult = {
   skippedCount: number;
 };
 
+type MigrationReport = {
+  count: number;
+  recovered: number;
+  deduped: number;
+  corrupted: number;
+};
+
 type HistoryReplicateFilter = "all" | "original" | "replicate";
 type HistorySortOption = "created-desc" | "created-asc" | "score-desc" | "score-asc";
 
@@ -78,7 +86,7 @@ type FragranceStructure = {
   phaseCount: number;
 };
 
-const storageKey = "hxwl-1-creations";
+const PAGE_SIZE = 20;
 
 const MAX_NOTES = 5;
 const MIN_DROPS_PER_NOTE = 1;
@@ -392,18 +400,6 @@ function resolveCreationNoteIds(creation: Creation): string[] {
   return ids;
 }
 
-function isValidCreation(data: unknown): data is Creation {
-  if (!data || typeof data !== "object") return false;
-  const obj = data as Record<string, unknown>;
-  return (
-    typeof obj.id === "string" &&
-    typeof obj.name === "string" &&
-    typeof obj.score === "number" &&
-    typeof obj.description === "string" &&
-    Array.isArray(obj.notes)
-  );
-}
-
 function resolveCreationNoteIdsLegacy(notes: string[]): string[] {
   const ids: string[] = [];
   for (const noteName of notes) {
@@ -560,16 +556,9 @@ function computeFragranceStructure(
   return { top, middle, base, overallTraits, phaseCount };
 }
 
-function loadHistory(): Creation[] {
+async function loadAllFromDB(): Promise<Creation[]> {
   try {
-    const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((item): item is Partial<Creation> & { id: string } => {
-        return item && typeof item === "object" && typeof (item as { id?: string }).id === "string";
-      })
-      .map(normalizeCreation)
-      .filter((item) => item.notes.length > 0 || item.score > 0);
+    return await libraryDB.getAll();
   } catch {
     return [];
   }
@@ -1133,7 +1122,10 @@ export default function App() {
     }
     return [];
   });
-  const [history, setHistory] = useState<Creation[]>(loadHistory);
+  const [history, setHistory] = useState<Creation[]>([]);
+  const [dbReady, setDbReady] = useState(false);
+  const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [historyNameFilter, setHistoryNameFilter] = useState("");
   const [historyNoteFilter, setHistoryNoteFilter] = useState("");
   const [historyScoreMin, setHistoryScoreMin] = useState("");
@@ -1205,31 +1197,56 @@ export default function App() {
   const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const reloadHistory = useCallback(async () => {
+    const all = await loadAllFromDB();
+    setHistory(all);
+  }, []);
+
   useEffect(() => {
-    const syncHistory = () => {
-      setHistory(loadHistory());
-    };
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === storageKey) {
-        syncHistory();
+    let mounted = true;
+    libraryDB.init(async () => {
+      if (mounted) {
+        const all = await loadAllFromDB();
+        if (mounted) setHistory(all);
       }
-    };
+    }).then(async (result) => {
+      if (!mounted) return;
+      if (result.migrationReport && result.migrationReport.count > 0) {
+        setMigrationReport(result.migrationReport);
+      }
+      const all = await loadAllFromDB();
+      if (mounted) {
+        setHistory(all);
+        setDbReady(true);
+      }
+    }).catch(async () => {
+      if (mounted) {
+        const all = await loadAllFromDB();
+        if (mounted) {
+          setHistory(all);
+          setDbReady(true);
+        }
+      }
+    });
+    return () => { mounted = false; libraryDB.destroy(); };
+  }, []);
+
+  useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        syncHistory();
+        reloadHistory();
       }
     };
-
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("focus", syncHistory);
+    const handleFocus = () => {
+      reloadHistory();
+    };
+    window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-
     return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("focus", syncHistory);
+      window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [reloadHistory]);
 
   useEffect(() => {
     if (selectedNotes.length > 0) {
@@ -1310,12 +1327,24 @@ export default function App() {
     historySort
   ]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredAndSortedHistory.length / PAGE_SIZE));
+  const safeHistoryPage = Math.min(historyPage, totalPages);
+  const pagedHistory = useMemo(() => {
+    const start = (safeHistoryPage - 1) * PAGE_SIZE;
+    return filteredAndSortedHistory.slice(start, start + PAGE_SIZE);
+  }, [filteredAndSortedHistory, safeHistoryPage]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historyNameFilter, historyNoteFilter, historyScoreMin, historyScoreMax, historyReplicateFilter, historySort]);
+
   function clearHistoryFilters() {
     setHistoryNameFilter("");
     setHistoryNoteFilter("");
     setHistoryScoreMin("");
     setHistoryScoreMax("");
     setHistoryReplicateFilter("all");
+    setHistoryPage(1);
   }
 
   const selectedNoteObjects = selectedNotes
@@ -1542,7 +1571,7 @@ export default function App() {
     setEditingSource(null);
   }
 
-  function saveAsNewCreation() {
+  async function saveAsNewCreation() {
     if (!current || selectedNotes.length === 0) return;
     if (!isValidForBottling) return;
     const { creation, newlyUnlockedNotes } = buildCurrentCreation();
@@ -1551,14 +1580,13 @@ export default function App() {
       creation.sourceCreationName = editingSource.sourceCreationName ?? editingSource.name;
       creation.isReplicate = true;
     }
-    const next = [creation, ...history].slice(0, 50);
-    setHistory(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    await libraryDB.add(creation);
+    setHistory([creation, ...history]);
     finalizeAfterSave(newlyUnlockedNotes);
     setSaveDialogOpen(false);
   }
 
-  function overwriteOriginalCreation() {
+  async function overwriteOriginalCreation() {
     if (!current || selectedNotes.length === 0 || !editingSource) return;
     if (!isValidForBottling) return;
     const { creation: newCreation, newlyUnlockedNotes } = buildCurrentCreation();
@@ -1573,13 +1601,9 @@ export default function App() {
       isReplicate: !!(original?.isReplicate ?? editingSource.isReplicate)
     };
 
+    await libraryDB.update(updatedCreation);
     const next = history.map((c) => (c.id === editingSource.id ? updatedCreation : c));
-    if (!next.find((c) => c.id === editingSource.id)) {
-      next.unshift(updatedCreation);
-    }
-    const sliced = next.slice(0, 50);
-    setHistory(sliced);
-    localStorage.setItem(storageKey, JSON.stringify(sliced));
+    setHistory(next);
     finalizeAfterSave(newlyUnlockedNotes);
     setSaveDialogOpen(false);
   }
@@ -1805,8 +1829,8 @@ export default function App() {
     resetQuiz();
   }
 
-  function exportCreations() {
-    const storedCreations = loadHistory();
+  async function exportCreations() {
+    const storedCreations = await loadAllFromDB();
     if (storedCreations.length === 0) {
       setHistory([]);
       return;
@@ -1911,16 +1935,16 @@ export default function App() {
 
   function importCreations(file: File) {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
         const rawData = JSON.parse(content);
         const importResult = parseImportData(rawData);
 
         if (importResult.success.length > 0) {
-          const merged = [...importResult.success, ...history].slice(0, 50);
+          await libraryDB.addAll(importResult.success);
+          const merged = [...importResult.success, ...history];
           setHistory(merged);
-          localStorage.setItem(storageKey, JSON.stringify(merged));
 
           for (const creation of importResult.success) {
             if (hasTraits(creation) && creation.score > 0) {
@@ -2524,7 +2548,7 @@ export default function App() {
         <div className="panel history-panel">
           <div className="history-header">
             <div className="history-title-row">
-              <h2>最近作品</h2>
+              <h2>作品库{history.length > 0 ? `（${history.length}）` : ""}</h2>
               <div className="history-header-right">
                 <label className="history-sort-select">
                   <select
@@ -2685,7 +2709,28 @@ export default function App() {
               </div>
             </div>
           )}
-          {calendarOpen ? (
+          {migrationReport && (
+            <div className="migration-banner">
+              <div className="migration-banner-content">
+                <span className="migration-banner-icon">📦</span>
+                <div className="migration-banner-text">
+                  <strong>数据迁移完成</strong>
+                  <span>已从旧版本迁移 {migrationReport.count} 个作品
+                    {migrationReport.deduped > 0 && `，修复 ${migrationReport.deduped} 个重复ID`}
+                    {migrationReport.corrupted > 0 && `，跳过 ${migrationReport.corrupted} 条损坏记录`}
+                    {migrationReport.recovered > 0 && `，恢复 ${migrationReport.recovered} 条记录`}
+                  </span>
+                </div>
+                <button className="migration-banner-close" onClick={() => setMigrationReport(null)}>×</button>
+              </div>
+            </div>
+          )}
+          {!dbReady ? (
+            <div className="history-loading">
+              <div className="history-loading-spinner" />
+              <span>加载作品库...</span>
+            </div>
+          ) : calendarOpen ? (
             <div className="calendar-view">
               {(() => {
                 const creationsByDate = new Map<string, Creation[]>();
@@ -2872,18 +2917,42 @@ export default function App() {
           ) : filteredAndSortedHistory.length === 0 ? (
             <p className="empty">没有符合筛选的作品。</p>
           ) : (
-            <div className="history-list">
-              {filteredAndSortedHistory.map((creation) => (
-                <button key={creation.id} className={`history-item ${creation.isReplicate ? "replicate-item" : ""}`} onClick={() => openCreationDetail(creation)}>
-                  <span>{creation.score}分</span>
-                  <h3>
-                    {creation.name}
-                    {creation.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
-                  </h3>
-                  <p>{(creation.notes || []).join(" / ") || "无香调记录"}</p>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="history-list">
+                {pagedHistory.map((creation) => (
+                  <button key={creation.id} className={`history-item ${creation.isReplicate ? "replicate-item" : ""}`} onClick={() => openCreationDetail(creation)}>
+                    <span>{creation.score}分</span>
+                    <h3>
+                      {creation.name}
+                      {creation.isReplicate && <small className="replicate-tag">✦ 复刻</small>}
+                    </h3>
+                    <p>{(creation.notes || []).join(" / ") || "无香调记录"}</p>
+                  </button>
+                ))}
+              </div>
+              {totalPages > 1 && (
+                <div className="pagination">
+                  <button
+                    className="ghost-button small pagination-btn"
+                    disabled={safeHistoryPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  >
+                    ◀ 上一页
+                  </button>
+                  <span className="pagination-info">
+                    {safeHistoryPage} / {totalPages}
+                    <small className="pagination-total">共 {filteredAndSortedHistory.length} 个</small>
+                  </span>
+                  <button
+                    className="ghost-button small pagination-btn"
+                    disabled={safeHistoryPage >= totalPages}
+                    onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    下一页 ▶
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </section>
